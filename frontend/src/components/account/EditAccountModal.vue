@@ -2,321 +2,1089 @@
   <BaseDialog
     :show="show"
     :title="t('admin.accounts.editAccount')"
-    width="wide"
+    width="extra-wide"
     @close="handleClose"
+
+    content-class="settings-dialog"
   >
     <form
       v-if="account"
       id="edit-account-form"
       @submit.prevent="handleSubmit"
-      class="space-y-5"
+      class="settings-form"
     >
-      <div>
-        <label class="input-label">{{ t('common.name') }}</label>
-        <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
-      </div>
-      <div>
-        <label class="input-label">{{ t('admin.accounts.notes') }}</label>
-        <textarea
-          v-model="form.notes"
-          rows="3"
-          class="input"
-          :placeholder="t('admin.accounts.notesPlaceholder')"
-        ></textarea>
-        <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
-      </div>
+      <SettingsLayout :sections="editSettingsSections" :reset-key="String(show) + account?.id">
+        <template #general>
+          <div>
+            <label class="input-label">{{ t('common.name') }}</label>
+            <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
+          </div>
 
-      <div v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
-        <label class="flex items-center gap-2 text-sm"><input v-model="openaiModelAliases" type="checkbox" data-testid="openai-model-aliases" />{{ t('priorityScheduling.modelAliases') }}</label>
-        <p class="input-hint">{{ t('priorityScheduling.modelAliasesHint') }}</p>
-      </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.notes') }}</label>
+            <textarea
+              v-model="form.notes"
+              rows="2"
+              class="input"
+              :placeholder="t('admin.accounts.notesPlaceholder')"
+            ></textarea>
+            <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
+          </div>
 
-      <!-- API Key fields (only for apikey type) -->
-      <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
-          <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
-          <input
-            v-model="editBaseUrl"
-            type="text"
-            class="input"
-            :placeholder="
-              account.platform === 'openai'
-                ? 'https://api.openai.com'
-                : account.platform === 'gemini'
-                  ? 'https://generativelanguage.googleapis.com'
-                  : account.platform === 'antigravity'
-                    ? 'https://cloudcode-pa.googleapis.com'
-                    : account.platform === 'grok'
-                      ? 'https://api.x.ai/v1'
-                      : 'https://api.anthropic.com'
-            "
-          />
-          <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
-          <GrokBaseUrlPresets
-            v-if="account.platform === 'grok'"
-            class="mt-2"
-            @select="editBaseUrl = $event"
-          />
-          <CnBaseUrlPresets
-            v-if="isCNApiKeyAccount && account.platform !== 'opencode_go'"
-            class="mt-2"
-            :platform="cnPresetPlatform"
-            :mode="editAccountMode"
-            :protocol="editApiProtocol"
-            :current-url="editBaseUrl"
-            @select="onCnPresetSelect"
-          />
-        </div>
-        <div v-else>
-          <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
-          <div class="mt-2 space-y-3">
-            <div v-for="item in editAdaptiveProtocolOptions" :key="item.value">
-              <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
+          <!-- OpenAI OAuth RPM limit -->
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <AccountRpmSettings
+              v-model:enabled="rpmLimitEnabled"
+              v-model:base-rpm="baseRpm"
+              strict
+            />
+          </div>
+
+          <!-- OpenAI 订阅档位手动覆盖（Plus/Pro/Free），仅 OAuth 非影子账号 -->
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.planType') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.planTypeDesc') }}
+                </p>
+              </div>
+              <div class="w-44 flex-shrink-0">
+                <Select v-model="editPlanType" :options="planTypeOptions" />
+              </div>
+            </div>
+          </div>
+
+          <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+            <div>
+              <label class="input-label">{{ t('common.status') }}</label>
+              <Select v-model="form.status" :options="statusOptions" />
+            </div>
+
+            <!-- Mixed Scheduling (only for antigravity accounts, read-only in edit mode) -->
+            <div v-if="account?.platform === 'antigravity'" class="flex items-center gap-2">
+              <label class="flex cursor-not-allowed items-center gap-2 opacity-60">
+                <input
+                  type="checkbox"
+                  v-model="mixedScheduling"
+                  disabled
+                  class="h-4 w-4 cursor-not-allowed rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
+                />
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.accounts.mixedScheduling') }}
+                </span>
               </label>
-              <input v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
+              <div class="group relative">
+                <span
+                  class="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-xs text-gray-500 hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500"
+                >
+              ?
+                </span>
+                <!-- Tooltip（向下显示避免被弹窗裁剪） -->
+                <div
+                  class="pointer-events-none absolute left-0 top-full z-[100] mt-1.5 w-72 rounded bg-gray-900 px-3 py-2 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+                >
+              {{ t('admin.accounts.mixedSchedulingTooltip') }}
+                  <div
+                    class="absolute bottom-full left-3 border-4 border-transparent border-b-gray-900 dark:border-b-gray-700"
+                  ></div>
+                </div>
+              </div>
+            </div>
+            <div v-if="account?.platform === 'antigravity'" class="mt-3 flex items-center gap-2">
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  v-model="allowOverages"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
+                />
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {{ t('admin.accounts.allowOverages') }}
+                </span>
+              </label>
+              <div class="group relative">
+                <span
+                  class="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-xs text-gray-500 hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500"
+                >
+              ?
+                </span>
+                <div
+                  class="pointer-events-none absolute left-0 top-full z-[100] mt-1.5 w-72 rounded bg-gray-900 px-3 py-2 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+                >
+              {{ t('admin.accounts.allowOveragesTooltip') }}
+                  <div
+                    class="absolute bottom-full left-3 border-4 border-transparent border-b-gray-900 dark:border-b-gray-700"
+                  ></div>
+                </div>
+              </div>
             </div>
           </div>
-          <p v-if="!cnSupportsNativeResponses(account.platform)" class="input-hint">
-            {{ t('admin.accounts.cnProviders.apiProtocol.responsesFallbackDesc') }}
-          </p>
-        </div>
-        <!-- OpenCode Zen vs GO -->
-        <div v-if="isCNApiKeyAccount && account.platform === 'opencode_go'">
-          <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
-          <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              @click="editOpenCodeAccountMode = 'zen'"
-              :class="[
-                'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
-                editOpenCodeAccountMode === 'zen'
-                  ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
-                  : 'border-gray-200 hover:border-gray-400 dark:border-dark-600 dark:hover:border-gray-600'
-              ]"
-            >
-              <div
-                :class="[
-                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                  editOpenCodeAccountMode === 'zen' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
-                ]"
-              >
-                <Icon name="creditCard" size="sm" />
-              </div>
-              <div>
-                <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.opencodeGo.accountMode.zen') }}</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.accountMode.zenDesc') }}</span>
-              </div>
-            </button>
-            <button
-              type="button"
-              @click="editOpenCodeAccountMode = 'go'"
-              :class="[
-                'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
-                editOpenCodeAccountMode === 'go'
-                  ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
-                  : 'border-gray-200 hover:border-gray-400 dark:border-dark-600 dark:hover:border-gray-600'
-              ]"
-            >
-              <div
-                :class="[
-                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                  editOpenCodeAccountMode === 'go' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
-                ]"
-              >
-                <Icon name="bolt" size="sm" />
-              </div>
-              <div>
-                <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.opencodeGo.accountMode.go') }}</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.accountMode.goDesc') }}</span>
-              </div>
-            </button>
-          </div>
-        </div>
-        <!-- Account Mode Selection (CN providers) -->
-        <div v-if="isCNApiKeyAccount && account.platform !== 'opencode_go'">
-          <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <button
-              v-for="opt in cnAccountModeOptions"
-              :key="opt.value"
-              type="button"
-              :class="[
-                'rounded-lg border-2 px-3 py-1.5 text-xs transition-all',
-                editAccountMode === opt.value
-                  ? 'border-primary-500 bg-primary-50 font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                  : 'border-gray-200 text-gray-700 hover:border-gray-400 dark:border-dark-600 dark:text-gray-300 dark:hover:border-gray-600'
-              ]"
-              @click="editAccountMode = opt.value"
-            >
-              {{ t(`admin.accounts.cnProviders.accountMode.${opt.labelKey}`) }}
-            </button>
-          </div>
-          <p class="input-hint">{{ t(`admin.accounts.cnProviders.accountMode.${editAccountMode}Desc`) }}</p>
-        </div>
-        <!-- API Protocol Selection (CN providers / OpenCode) -->
-        <div v-if="isCNApiKeyAccount">
-          <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.title') }}</label>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <button
-              v-for="opt in cnProtocolOptions"
-              :key="opt.value"
-              type="button"
-              :class="[
-                'rounded-lg border-2 px-3 py-1.5 text-xs transition-all',
-                editApiProtocol === opt.value
-                  ? 'border-primary-500 bg-primary-50 font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                  : 'border-gray-200 text-gray-700 hover:border-gray-400 dark:border-dark-600 dark:text-gray-300 dark:hover:border-gray-600'
-              ]"
-              @click="editApiProtocol = opt.value"
-            >
-              {{ t(`admin.accounts.cnProviders.apiProtocol.${opt.labelKey}`) }}
-            </button>
-          </div>
-          <p class="input-hint">{{ t(`admin.accounts.cnProviders.apiProtocol.${cnProtocolDescKey}Desc`) }}</p>
-        </div>
-        <OpenCodeGoProtocolRulesEditor
-          v-if="account.platform === 'opencode_go' && editApiProtocol === 'adaptive'"
-          v-model:rows="editOpenCodeGoProtocolRules"
-          :plan="editOpenCodeAccountMode"
-        />
-        <!-- Zhipu 团队版 Coding Plan：组织/项目 ID（可选，填写后用量查询走团队版端点） -->
-        <div v-if="account.platform === 'zhipu' && editAccountMode === 'coding'">
-          <div class="flex items-center">
-            <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.title') }}</label>
-            <HelpTooltip trigger="click" width-class="w-80">
-              <p class="mb-1 font-medium">{{ t('admin.accounts.cnProviders.zhipuTeam.help.title') }}</p>
-              <ol class="list-decimal space-y-1 pl-4">
-                <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step1') }}</li>
-                <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step2') }}</li>
-                <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step3') }}</li>
-                <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step4') }}</li>
-              </ol>
-              <p class="mt-2 break-all rounded bg-black/20 p-1.5 font-mono text-[11px] leading-relaxed">
-                {{ t('admin.accounts.cnProviders.zhipuTeam.help.example') }}
-              </p>
-            </HelpTooltip>
-          </div>
-          <div class="mt-2 grid gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.organization') }}</label>
-              <input v-model="editZhipuOrganization" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.organizationPlaceholder')" />
-            </div>
-            <div>
-              <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.project') }}</label>
-              <input v-model="editZhipuProject" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.projectPlaceholder')" />
-            </div>
-          </div>
-          <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
-          <input
-            v-model="editApiKey"
-            type="password"
-            class="input font-mono"
-            autocomplete="new-password"
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore="true"
-            :placeholder="
-              account.platform === 'openai'
-                ? 'sk-proj-...'
-                : account.platform === 'gemini'
-                  ? 'AIza...'
-                  : account.platform === 'antigravity'
-                    ? 'sk-...'
-                    : account.platform === 'grok'
-                      ? 'xai-...'
-                      : 'sk-ant-...'
-            "
-          />
-          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
-        </div>
 
-        <!-- Model Restriction Section (不适用于 Antigravity) -->
-        <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+          <!-- Group Selection - 仅标准模式显示 -->
+          <GroupSelector
+            v-model="form.group_ids"
+            :groups="selectableGroups"
+            :platform="account?.platform"
+            :mixed-scheduling="mixedScheduling"
+            data-tour="account-form-groups"
+          />
+        </template>
+        <template #connection>
+          <div v-if="account.type === 'apikey'" class="space-y-4">
+            <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+              <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
+              <input
+                v-model="editBaseUrl"
+                type="text"
+                class="input"
+                :placeholder="
+                  account.platform === 'openai'
+                    ? 'https://api.openai.com'
+                    : account.platform === 'gemini'
+                      ? 'https://generativelanguage.googleapis.com'
+                      : account.platform === 'antigravity'
+                        ? 'https://cloudcode-pa.googleapis.com'
+                        : account.platform === 'grok'
+                          ? 'https://api.x.ai/v1'
+                          : 'https://api.anthropic.com'
+                "
+              />
+              <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
+              <GrokBaseUrlPresets
+                v-if="account.platform === 'grok'"
+                class="mt-2"
+                @select="editBaseUrl = $event"
+              />
+              <CnBaseUrlPresets
+                v-if="isCNApiKeyAccount && account.platform !== 'opencode_go'"
+                class="mt-2"
+                :platform="cnPresetPlatform"
+                :mode="editAccountMode"
+                :protocol="editApiProtocol"
+                :current-url="editBaseUrl"
+                @select="onCnPresetSelect"
+              />
+            </div>
+
+            <div v-else>
+              <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
+              <div class="mt-2 space-y-3">
+                <div v-for="item in editAdaptiveProtocolOptions" :key="item.value">
+                  <label class="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+                {{ t(`admin.accounts.cnProviders.apiProtocol.${item.labelKey}`) }}
+                  </label>
+                  <input v-model="editAdaptiveBaseUrls[item.value]" type="text" class="input" />
+                </div>
+              </div>
+              <p v-if="!cnSupportsNativeResponses(account.platform)" class="input-hint">
+            {{ t('admin.accounts.cnProviders.apiProtocol.responsesFallbackDesc') }}
+              </p>
+            </div>
+
+            <!-- OpenCode Zen vs GO -->
+            <div v-if="isCNApiKeyAccount && account.platform === 'opencode_go'">
+              <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
+              <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  @click="editOpenCodeAccountMode = 'zen'"
+                  :class="[
+                    'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+                    editOpenCodeAccountMode === 'zen'
+                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                      : 'border-gray-200 hover:border-gray-400 dark:border-dark-600 dark:hover:border-gray-600'
+                  ]"
+                >
+                  <div
+                    :class="[
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                      editOpenCodeAccountMode === 'zen' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+                    ]"
+                  >
+                    <Icon name="creditCard" size="sm" />
+                  </div>
+                  <div>
+                    <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.opencodeGo.accountMode.zen') }}</span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.accountMode.zenDesc') }}</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  @click="editOpenCodeAccountMode = 'go'"
+                  :class="[
+                    'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+                    editOpenCodeAccountMode === 'go'
+                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                      : 'border-gray-200 hover:border-gray-400 dark:border-dark-600 dark:hover:border-gray-600'
+                  ]"
+                >
+                  <div
+                    :class="[
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                      editOpenCodeAccountMode === 'go' ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+                    ]"
+                  >
+                    <Icon name="bolt" size="sm" />
+                  </div>
+                  <div>
+                    <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.opencodeGo.accountMode.go') }}</span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.accountMode.goDesc') }}</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Account Mode Selection (CN providers) -->
+            <div v-if="isCNApiKeyAccount && account.platform !== 'opencode_go'">
+              <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <button
+                  v-for="opt in cnAccountModeOptions"
+                  :key="opt.value"
+                  type="button"
+                  :class="[
+                    'rounded-lg border-2 px-3 py-1.5 text-xs transition-all',
+                    editAccountMode === opt.value
+                      ? 'border-primary-500 bg-primary-50 font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                      : 'border-gray-200 text-gray-700 hover:border-gray-400 dark:border-dark-600 dark:text-gray-300 dark:hover:border-gray-600'
+                  ]"
+                  @click="editAccountMode = opt.value"
+                >
+              {{ t(`admin.accounts.cnProviders.accountMode.${opt.labelKey}`) }}
+                </button>
+              </div>
+              <p class="input-hint">{{ t(`admin.accounts.cnProviders.accountMode.${editAccountMode}Desc`) }}</p>
+            </div>
+
+            <!-- API Protocol Selection (CN providers / OpenCode) -->
+            <div v-if="isCNApiKeyAccount">
+              <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.title') }}</label>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <button
+                  v-for="opt in cnProtocolOptions"
+                  :key="opt.value"
+                  type="button"
+                  :class="[
+                    'rounded-lg border-2 px-3 py-1.5 text-xs transition-all',
+                    editApiProtocol === opt.value
+                      ? 'border-primary-500 bg-primary-50 font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                      : 'border-gray-200 text-gray-700 hover:border-gray-400 dark:border-dark-600 dark:text-gray-300 dark:hover:border-gray-600'
+                  ]"
+                  @click="editApiProtocol = opt.value"
+                >
+              {{ t(`admin.accounts.cnProviders.apiProtocol.${opt.labelKey}`) }}
+                </button>
+              </div>
+              <p class="input-hint">{{ t(`admin.accounts.cnProviders.apiProtocol.${cnProtocolDescKey}Desc`) }}</p>
+            </div>
+
+            <OpenCodeGoProtocolRulesEditor
+              v-if="account.platform === 'opencode_go' && editApiProtocol === 'adaptive'"
+              v-model:rows="editOpenCodeGoProtocolRules"
+              :plan="editOpenCodeAccountMode"
+            />
+
+            <!-- Zhipu 团队版 Coding Plan：组织/项目 ID（可选，填写后用量查询走团队版端点） -->
+            <div v-if="account.platform === 'zhipu' && editAccountMode === 'coding'">
+              <div class="flex items-center">
+                <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.title') }}</label>
+                <HelpTooltip trigger="click" width-class="w-80">
+                  <p class="mb-1 font-medium">{{ t('admin.accounts.cnProviders.zhipuTeam.help.title') }}</p>
+                  <ol class="list-decimal space-y-1 pl-4">
+                    <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step1') }}</li>
+                    <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step2') }}</li>
+                    <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step3') }}</li>
+                    <li>{{ t('admin.accounts.cnProviders.zhipuTeam.help.step4') }}</li>
+                  </ol>
+                  <p class="mt-2 break-all rounded bg-black/20 p-1.5 font-mono text-[11px] leading-relaxed">
+                {{ t('admin.accounts.cnProviders.zhipuTeam.help.example') }}
+                  </p>
+                </HelpTooltip>
+              </div>
+              <div class="mt-2 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.organization') }}</label>
+                  <input v-model="editZhipuOrganization" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.organizationPlaceholder')" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.project') }}</label>
+                  <input v-model="editZhipuProject" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.projectPlaceholder')" />
+                </div>
+              </div>
+              <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
+            </div>
+
+            <div>
+              <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
+              <input
+                v-model="editApiKey"
+                type="password"
+                class="input font-mono"
+                autocomplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                :placeholder="
+                  account.platform === 'openai'
+                    ? 'sk-proj-...'
+                    : account.platform === 'gemini'
+                      ? 'AIza...'
+                      : account.platform === 'antigravity'
+                        ? 'sk-...'
+                        : account.platform === 'grok'
+                          ? 'xai-...'
+                          : 'sk-ant-...'
+                "
+              />
+              <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+            </div>
+          </div>
+
+          <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
+          <div
+            v-if="account.platform === 'grok' && account.type === 'oauth'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="mb-3 flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.grokCustomBaseUrl.title') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.grokCustomBaseUrl.hint') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid="grok-custom-base-url-toggle"
+                @click="grokOAuthCustomBaseUrlEnabled = !grokOAuthCustomBaseUrlEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  grokOAuthCustomBaseUrlEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    grokOAuthCustomBaseUrlEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+            <div v-if="grokOAuthCustomBaseUrlEnabled" class="space-y-2">
+              <input
+                v-model="grokOAuthBaseUrl"
+                type="text"
+                class="input"
+                data-testid="grok-custom-base-url-input"
+                :placeholder="t('admin.accounts.grokCustomBaseUrl.placeholder')"
+              />
+              <GrokBaseUrlPresets @select="grokOAuthBaseUrl = $event" />
+            </div>
+          </div>
+
+          <!-- Header Override Section (eligible API-key platforms + grok OAuth) -->
+          <div v-if="headerOverrideCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+            <div class="mb-3 flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.headerOverride.hint') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="headerOverrideEnabled = !headerOverrideEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+
+            <div v-if="headerOverrideEnabled" class="space-y-3">
+              <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                <p class="text-xs text-blue-700 dark:text-blue-400">
+                  <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
+              {{ t('admin.accounts.headerOverride.info') }}
+                </p>
+              </div>
+
+              <HeaderOverrideEditor
+                :rows="headerOverrideRows"
+                @update:rows="headerOverrideRows = $event"
+              />
+            </div>
+          </div>
+
+          <!-- Upstream fields (only for upstream type) -->
+          <div v-if="account.type === 'upstream'" class="space-y-4">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
+              <input
+                v-model="editBaseUrl"
+                type="text"
+                class="input"
+                placeholder="https://cloudcode-pa.googleapis.com"
+              />
+              <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
+              <input
+                v-model="editApiKey"
+                type="password"
+                class="input font-mono"
+                placeholder="sk-..."
+              />
+              <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
+            </div>
+          </div>
+
+          <div v-if="(account.platform === 'gemini' || account.platform === 'anthropic') && account.type === 'service_account'" class="space-y-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label class="input-label">Project ID</label>
+                <input
+                  v-model="editVertexProjectId"
+                  type="text"
+                  class="input font-mono"
+                  readonly
+                  :placeholder="t('admin.accounts.vertexProjectIdPlaceholder')"
+                />
+                <p class="input-hint">{{ t('admin.accounts.vertexSaJsonEditHint') }}</p>
+              </div>
+              <div>
+                <label class="input-label">Location</label>
+                <select
+                  v-model="editVertexLocation"
+                  required
+                  class="input font-mono"
+                >
+                  <optgroup
+                    v-for="group in VERTEX_LOCATION_OPTIONS"
+                    :key="group.label"
+                    :label="group.label"
+                  >
+                    <option
+                      v-for="option in group.options"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                  {{ option.label }}
+                    </option>
+                  </optgroup>
+                </select>
+                <p class="input-hint">{{ t('admin.accounts.vertexLocationHint') }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="account.type === 'bedrock'" class="space-y-4">
+            <!-- SigV4 fields -->
+            <template v-if="!isBedrockAPIKeyMode">
+              <div>
+                <label class="input-label">{{ t('admin.accounts.bedrockAccessKeyId') }}</label>
+                <input
+                  v-model="editBedrockAccessKeyId"
+                  type="text"
+                  class="input font-mono"
+                  placeholder="AKIA..."
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.accounts.bedrockSecretAccessKey') }}</label>
+                <input
+                  v-model="editBedrockSecretAccessKey"
+                  type="password"
+                  class="input font-mono"
+                  :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
+                />
+                <p class="input-hint">{{ t('admin.accounts.bedrockSecretKeyLeaveEmpty') }}</p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.accounts.bedrockSessionToken') }}</label>
+                <input
+                  v-model="editBedrockSessionToken"
+                  type="password"
+                  class="input font-mono"
+                  :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
+                />
+                <p class="input-hint">{{ t('admin.accounts.bedrockSessionTokenHint') }}</p>
+              </div>
+            </template>
+
+            <!-- API Key field -->
+            <div v-if="isBedrockAPIKeyMode">
+              <label class="input-label">{{ t('admin.accounts.bedrockApiKeyInput') }}</label>
+              <input
+                v-model="editBedrockApiKeyValue"
+                type="password"
+                class="input font-mono"
+                :placeholder="t('admin.accounts.bedrockApiKeyLeaveEmpty')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.bedrockApiKeyLeaveEmpty') }}</p>
+            </div>
+
+            <!-- Shared: Region -->
+            <div>
+              <label class="input-label">{{ t('admin.accounts.bedrockRegion') }}</label>
+              <input
+                v-model="editBedrockRegion"
+                type="text"
+                class="input"
+                placeholder="us-east-1"
+              />
+              <p class="input-hint">{{ t('admin.accounts.bedrockRegionHint') }}</p>
+            </div>
+
+            <!-- Shared: Force Global -->
+            <div>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input
+                  v-model="editBedrockForceGlobal"
+                  type="checkbox"
+                  class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.bedrockForceGlobal') }}</span>
+              </label>
+              <p class="input-hint mt-1">{{ t('admin.accounts.bedrockForceGlobalHint') }}</p>
+            </div>
+          </div>
 
           <div
-            v-if="isOpenAIModelRestrictionDisabled"
-            class="mb-3 rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
+            v-if="account.platform === 'antigravity' && account.type === 'oauth'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
           >
-            <p class="text-xs text-amber-700 dark:text-amber-400">
-              {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
-            </p>
+            <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
+            <input
+              v-model="antigravityProjectId"
+              data-testid="antigravity-project-id-input"
+              type="text"
+              class="input font-mono"
+              :placeholder="t('admin.accounts.antigravityProjectIdPlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.accounts.antigravityProjectIdHint') }}</p>
           </div>
 
-          <template v-else>
-            <!-- Mode Toggle -->
-            <div class="mb-4 flex gap-2">
-              <button
-                type="button"
-                @click="modelRestrictionMode = 'whitelist'"
-                :class="[
-                  'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                  modelRestrictionMode === 'whitelist'
-                    ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-                ]"
-              >
-                <svg
-                  class="mr-1.5 inline h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                {{ t('admin.accounts.modelWhitelist') }}
-              </button>
-              <button
-                type="button"
-                @click="modelRestrictionMode = 'mapping'"
-                :class="[
-                  'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                  modelRestrictionMode === 'mapping'
-                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-                ]"
-              >
-                <svg
-                  class="mr-1.5 inline h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-                  />
-                </svg>
-                {{ t('admin.accounts.modelMapping') }}
-              </button>
+          <div v-if="!isSparkShadow && !authStore.isObserver">
+            <div class="mb-1 flex items-center gap-2">
+              <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
+              <ProxyAdBanner />
             </div>
+            <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
+          </div>
 
-            <!-- Whitelist Mode -->
-            <div v-if="modelRestrictionMode === 'whitelist'">
-              <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
-              <p class="text-xs text-gray-500 dark:text-gray-400">
+          <UpstreamRequestIdHeaderField
+            v-model="upstreamRequestIdHeader"
+            :platform="account.platform"
+            :type="account.type"
+          />
+
+          <div
+            v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.anthropic.apiKeyAuthScheme') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropic.apiKeyAuthSchemeDesc') }}
+                </p>
+              </div>
+              <select v-model="anthropicAPIKeyAuthScheme" class="input w-52 text-sm">
+                <option value="x_api_key">{{ t('admin.accounts.anthropic.apiKeyAuthSchemeXApiKey') }}</option>
+                <option value="authorization_bearer">{{ t('admin.accounts.anthropic.apiKeyAuthSchemeBearer') }}</option>
+              </select>
+            </div>
+          </div>
+        </template>
+        <template #models>
+          <div v-if="account.platform === 'openai' && account.type === 'oauth' && !isSparkShadow" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
+            <label class="flex items-center gap-2 text-sm"><input v-model="openaiModelAliases" type="checkbox" data-testid="openai-model-aliases" />{{ t('priorityScheduling.modelAliases') }}</label>
+            <p class="input-hint">{{ t('priorityScheduling.modelAliasesHint') }}</p>
+          </div>
+
+          <div v-if="account.type === 'apikey'" class="space-y-4">
+            <!-- Model Restriction Section (不适用于 Antigravity) -->
+            <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+              <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+
+              <div
+                v-if="isOpenAIModelRestrictionDisabled"
+                class="mb-3 rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
+              >
+                <p class="text-xs text-amber-700 dark:text-amber-400">
+              {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
+                </p>
+              </div>
+
+              <template v-else>
+                <!-- Mode Toggle -->
+                <div class="mb-4 flex gap-2">
+                  <button
+                    type="button"
+                    @click="modelRestrictionMode = 'whitelist'"
+                    :class="[
+                      'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                      modelRestrictionMode === 'whitelist'
+                        ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                    ]"
+                  >
+                    <svg
+                      class="mr-1.5 inline h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                {{ t('admin.accounts.modelWhitelist') }}
+                  </button>
+                  <button
+                    type="button"
+                    @click="modelRestrictionMode = 'mapping'"
+                    :class="[
+                      'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                      modelRestrictionMode === 'mapping'
+                        ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                    ]"
+                  >
+                    <svg
+                      class="mr-1.5 inline h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                      />
+                    </svg>
+                {{ t('admin.accounts.modelMapping') }}
+                  </button>
+                </div>
+
+                <!-- Whitelist Mode -->
+                <div v-if="modelRestrictionMode === 'whitelist'">
+                  <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-                <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+                    <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
                   t('admin.accounts.supportsAllModels')
                 }}</span>
+                  </p>
+                </div>
+
+                <!-- Mapping Mode -->
+                <div v-else>
+                  <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
+                    <p class="text-xs text-purple-700 dark:text-purple-400">
+                      <svg
+                        class="mr-1 inline h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                  {{ t('admin.accounts.mapRequestModels') }}
+                    </p>
+                  </div>
+
+                  <!-- Model Mapping List -->
+                  <div v-if="modelMappings.length > 0" class="mb-3 space-y-2 max-h-64 overflow-y-auto overscroll-contain pr-1">
+                    <div
+                      v-for="(mapping, index) in modelMappings"
+                      :key="getModelMappingKey(mapping)"
+                      class="flex items-center gap-2"
+                    >
+                      <input
+                        v-model="mapping.from"
+                        type="text"
+                        class="input flex-1"
+                        :placeholder="t('admin.accounts.requestModel')"
+                      />
+                      <svg
+                        class="h-4 w-4 flex-shrink-0 text-gray-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M14 5l7 7m0 0l-7 7m7-7H3"
+                        />
+                      </svg>
+                      <input
+                        v-model="mapping.to"
+                        type="text"
+                        class="input flex-1"
+                        :placeholder="t('admin.accounts.actualModel')"
+                      />
+                      <button
+                        type="button"
+                        @click="removeModelMapping(index)"
+                        class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                      >
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    @click="addModelMapping"
+                    class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+                  >
+                    <svg
+                      class="mr-1 inline h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+              {{ t('admin.accounts.addMapping') }}
+                  </button>
+
+                  <!-- Quick Add Buttons -->
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="preset in presetMappings"
+                      :key="preset.label"
+                      type="button"
+                      @click="addPresetMapping(preset.from, preset.to)"
+                      :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
+                    >
+                  + {{ preset.label }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
+          <div
+            v-if="(account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+
+            <div
+              v-if="isOpenAIModelRestrictionDisabled"
+              class="mb-3 rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
+            >
+              <p class="text-xs text-amber-700 dark:text-amber-400">
+            {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
               </p>
             </div>
 
-            <!-- Mapping Mode -->
-            <div v-else>
-              <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-                <p class="text-xs text-purple-700 dark:text-purple-400">
+            <template v-else>
+              <!-- Mode Toggle -->
+              <div class="mb-4 flex gap-2">
+                <button
+                  type="button"
+                  @click="modelRestrictionMode = 'whitelist'"
+                  :class="[
+                    'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                    modelRestrictionMode === 'whitelist'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+              {{ t('admin.accounts.modelWhitelist') }}
+                </button>
+                <button
+                  type="button"
+                  @click="modelRestrictionMode = 'mapping'"
+                  :class="[
+                    'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                    modelRestrictionMode === 'mapping'
+                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+              {{ t('admin.accounts.modelMapping') }}
+                </button>
+              </div>
+
+              <!-- Whitelist Mode -->
+              <div v-if="modelRestrictionMode === 'whitelist'">
+                <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
+                  <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+                t('admin.accounts.supportsAllModels')
+              }}</span>
+                </p>
+              </div>
+
+              <!-- Mapping Mode -->
+              <div v-else>
+                <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
+                  <p class="text-xs text-purple-700 dark:text-purple-400">
+                {{ t('admin.accounts.mapRequestModels') }}
+                  </p>
+                </div>
+
+                <div v-if="modelMappings.length > 0" class="mb-3 space-y-2 max-h-64 overflow-y-auto overscroll-contain pr-1">
+                  <div
+                    v-for="(mapping, index) in modelMappings"
+                    :key="'oauth-' + getModelMappingKey(mapping)"
+                    class="flex items-center gap-2"
+                  >
+                    <input
+                      v-model="mapping.from"
+                      type="text"
+                      class="input flex-1"
+                      :placeholder="t('admin.accounts.requestModel')"
+                    />
+                    <svg
+                      class="h-4 w-4 flex-shrink-0 text-gray-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
+                      />
+                    </svg>
+                    <input
+                      v-model="mapping.to"
+                      type="text"
+                      class="input flex-1"
+                      :placeholder="t('admin.accounts.actualModel')"
+                    />
+                    <button
+                      type="button"
+                      @click="removeModelMapping(index)"
+                      class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                    >
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  @click="addModelMapping"
+                  class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+                >
+              + {{ t('admin.accounts.addMapping') }}
+                </button>
+
+                <!-- Quick Add Buttons -->
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="preset in presetMappings"
+                    :key="'oauth-' + preset.label"
+                    type="button"
+                    @click="addPresetMapping(preset.from, preset.to)"
+                    :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
+                  >
+                + {{ preset.label }}
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div v-if="(account.platform === 'gemini' || account.platform === 'anthropic') && account.type === 'service_account'" class="space-y-4">
+            <!-- Model Restriction Section for Service Account -->
+            <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+              <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+
+              <!-- Mode Toggle -->
+              <div class="mb-4 flex gap-2">
+                <button
+                  type="button"
+                  @click="modelRestrictionMode = 'whitelist'"
+                  :class="[
+                    'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                    modelRestrictionMode === 'whitelist'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  <svg
+                    class="mr-1.5 inline h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+              {{ t('admin.accounts.modelWhitelist') }}
+                </button>
+                <button
+                  type="button"
+                  @click="modelRestrictionMode = 'mapping'"
+                  :class="[
+                    'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                    modelRestrictionMode === 'mapping'
+                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+                  <svg
+                    class="mr-1.5 inline h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                    />
+                  </svg>
+              {{ t('admin.accounts.modelMapping') }}
+                </button>
+              </div>
+
+              <!-- Whitelist Mode -->
+              <div v-if="modelRestrictionMode === 'whitelist'">
+                <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
+                  <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
+                t('admin.accounts.supportsAllModels')
+              }}</span>
+                </p>
+              </div>
+
+              <!-- Mapping Mode -->
+              <div v-else>
+                <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
+                  <p class="text-xs text-purple-700 dark:text-purple-400">
+                    <svg
+                      class="mr-1 inline h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                {{ t('admin.accounts.mapRequestModels') }}
+                  </p>
+                </div>
+
+                <!-- Model Mapping List -->
+                <div v-if="modelMappings.length > 0" class="mb-3 space-y-2 max-h-64 overflow-y-auto overscroll-contain pr-1">
+                  <div
+                    v-for="(mapping, index) in modelMappings"
+                    :key="getModelMappingKey(mapping)"
+                    class="flex items-center gap-2"
+                  >
+                    <input
+                      v-model="mapping.from"
+                      type="text"
+                      class="input flex-1"
+                      :placeholder="t('admin.accounts.requestModel')"
+                    />
+                    <svg
+                      class="h-4 w-4 flex-shrink-0 text-gray-400"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M14 5l7 7m0 0l-7 7m7-7H3"
+                      />
+                    </svg>
+                    <input
+                      v-model="mapping.to"
+                      type="text"
+                      class="input flex-1"
+                      :placeholder="t('admin.accounts.actualModel')"
+                    />
+                    <button
+                      type="button"
+                      @click="removeModelMapping(index)"
+                      class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                    >
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  @click="addModelMapping"
+                  class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+                >
                   <svg
                     class="mr-1 inline h-4 w-4"
                     fill="none"
@@ -327,1377 +1095,302 @@
                       stroke-linecap="round"
                       stroke-linejoin="round"
                       stroke-width="2"
-                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      d="M12 4v16m8-8H4"
                     />
                   </svg>
-                  {{ t('admin.accounts.mapRequestModels') }}
+              {{ t('admin.accounts.addMapping') }}
+                </button>
+
+                <!-- Quick Add Buttons -->
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="preset in presetMappings"
+                    :key="preset.label"
+                    type="button"
+                    @click="addPresetMapping(preset.from, preset.to)"
+                    :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
+                  >
+                + {{ preset.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="account.type === 'bedrock'" class="space-y-4">
+            <!-- Model Restriction for Bedrock -->
+            <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+              <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+
+              <!-- Mode Toggle -->
+              <div class="mb-4 flex gap-2">
+                <button
+                  type="button"
+                  @click="modelRestrictionMode = 'whitelist'"
+                  :class="[
+                    'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                    modelRestrictionMode === 'whitelist'
+                      ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+              {{ t('admin.accounts.modelWhitelist') }}
+                </button>
+                <button
+                  type="button"
+                  @click="modelRestrictionMode = 'mapping'"
+                  :class="[
+                    'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                    modelRestrictionMode === 'mapping'
+                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                  ]"
+                >
+              {{ t('admin.accounts.modelMapping') }}
+                </button>
+              </div>
+
+              <!-- Whitelist Mode -->
+              <div v-if="modelRestrictionMode === 'whitelist'">
+                <ModelWhitelistSelector v-model="allowedModels" platform="anthropic" />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
+                  <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
                 </p>
               </div>
 
-            <!-- Model Mapping List -->
-            <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
-              <div
-                v-for="(mapping, index) in modelMappings"
-                :key="getModelMappingKey(mapping)"
-                class="flex items-center gap-2"
-              >
-                <input
-                  v-model="mapping.from"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.requestModel')"
-                />
-                <svg
-                  class="h-4 w-4 flex-shrink-0 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M14 5l7 7m0 0l-7 7m7-7H3"
-                  />
-                </svg>
-                <input
-                  v-model="mapping.to"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.actualModel')"
-                />
-                <button
-                  type="button"
-                  @click="removeModelMapping(index)"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
+              <!-- Mapping Mode -->
+              <div v-else class="space-y-3 max-h-64 overflow-y-auto overscroll-contain pr-1">
+                <div v-for="(mapping, index) in modelMappings" :key="getModelMappingKey(mapping)" class="flex items-center gap-2">
+                  <input v-model="mapping.from" type="text" class="input flex-1" :placeholder="t('admin.accounts.fromModel')" />
+                  <span class="text-gray-400">→</span>
+                  <input v-model="mapping.to" type="text" class="input flex-1" :placeholder="t('admin.accounts.toModel')" />
+                  <button type="button" @click="modelMappings.splice(index, 1)" class="text-red-500 hover:text-red-700">
+                    <Icon name="trash" size="sm" />
+                  </button>
+                </div>
+                <button type="button" @click="modelMappings.push({ from: '', to: '' })" class="btn btn-secondary text-sm">
+              + {{ t('admin.accounts.addMapping') }}
                 </button>
+                <!-- Bedrock Preset Mappings -->
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="preset in bedrockPresets"
+                    :key="preset.from"
+                    type="button"
+                    @click="modelMappings.push({ from: preset.from, to: preset.to })"
+                    :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
+                  >
+                + {{ preset.label }}
+                  </button>
+                </div>
               </div>
             </div>
+          </div>
 
-            <button
-              type="button"
-              @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-            >
-              <svg
-                class="mr-1 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+          <!-- Antigravity model restriction (applies to all antigravity types) -->
+          <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
+          <div v-if="account.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+            <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
+
+            <!-- Mapping Mode Only (no toggle for Antigravity) -->
+            <div>
+              <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
+                <p class="text-xs text-purple-700 dark:text-purple-400">{{ t('admin.accounts.mapRequestModels') }}</p>
+              </div>
+
+              <div class="mb-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  @click="syncAntigravityUpstreamModels"
+                  :disabled="isSyncingAntigravityUpstream || !account?.id"
+                  class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+                >
+              {{ isSyncingAntigravityUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
+                </button>
+              </div>
+
+              <div v-if="antigravityModelMappings.length > 0" class="mb-3 space-y-2 max-h-64 overflow-y-auto overscroll-contain pr-1">
+                <div
+                  v-for="(mapping, index) in antigravityModelMappings"
+                  :key="getAntigravityModelMappingKey(mapping)"
+                  class="space-y-1"
+                >
+                  <div class="flex items-center gap-2">
+                    <input
+                      v-model="mapping.from"
+                      type="text"
+                      :class="[
+                        'input flex-1',
+                        !isValidWildcardPattern(mapping.from) ? 'border-red-500 dark:border-red-500' : '',
+                        mapping.to.includes('*') ? '' : ''
+                      ]"
+                      :placeholder="t('admin.accounts.requestModel')"
+                    />
+                    <svg class="h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                    <input
+                      v-model="mapping.to"
+                      type="text"
+                      :class="[
+                        'input flex-1',
+                        mapping.to.includes('*') ? 'border-red-500 dark:border-red-500' : ''
+                      ]"
+                      :placeholder="t('admin.accounts.actualModel')"
+                    />
+                    <button
+                      type="button"
+                      @click="removeAntigravityModelMapping(index)"
+                      class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                    >
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  <!-- 校验错误提示 -->
+                  <p v-if="!isValidWildcardPattern(mapping.from)" class="text-xs text-red-500">
+                {{ t('admin.accounts.wildcardOnlyAtEnd') }}
+                  </p>
+                  <p v-if="mapping.to.includes('*')" class="text-xs text-red-500">
+                {{ t('admin.accounts.targetNoWildcard') }}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                @click="addAntigravityModelMapping"
+                class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-              {{ t('admin.accounts.addMapping') }}
-            </button>
+                <svg class="mr-1 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+            {{ t('admin.accounts.addMapping') }}
+              </button>
 
-              <!-- Quick Add Buttons -->
               <div class="flex flex-wrap gap-2">
                 <button
-                  v-for="preset in presetMappings"
+                  v-for="preset in antigravityPresetMappings"
                   :key="preset.label"
                   type="button"
-                  @click="addPresetMapping(preset.from, preset.to)"
+                  @click="addAntigravityPresetMapping(preset.from, preset.to)"
                   :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
                 >
-                  + {{ preset.label }}
+              + {{ preset.label }}
                 </button>
               </div>
             </div>
-          </template>
-        </div>
-
-        <!-- Pool Mode Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="poolModeEnabled = !poolModeEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                poolModeEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  poolModeEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-            <p class="text-xs text-blue-700 dark:text-blue-400">
-              <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.poolModeInfo') }}
-            </p>
-          </div>
-          <div v-if="poolModeEnabled" class="mt-3">
-            <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
-            <input
-              v-model.number="poolModeRetryCount"
-              type="number"
-              min="0"
-              :max="MAX_POOL_MODE_RETRY_COUNT"
-              step="1"
-              class="input"
-            />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{
-                t('admin.accounts.poolModeRetryCountHint', {
-                  default: DEFAULT_POOL_MODE_RETRY_COUNT,
-                  max: MAX_POOL_MODE_RETRY_COUNT
-                })
-              }}
-            </p>
-          </div>
-          <div v-if="poolModeEnabled" class="mt-3">
-            <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
-            <input
-              v-model="poolModeRetryStatusCodesInput"
-              type="text"
-              class="input"
-              :placeholder="DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ')"
-            />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.poolModeRetryStatusCodesHint', { default: DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ') }) }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Custom Error Codes Section -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.customErrorCodes') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.customErrorCodesHint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="customErrorCodesEnabled = !customErrorCodesEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                customErrorCodesEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  customErrorCodesEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
           </div>
 
-          <div v-if="customErrorCodesEnabled" class="space-y-3">
-            <div class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20">
-              <p class="text-xs text-amber-700 dark:text-amber-400">
-                <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
-                {{ t('admin.accounts.customErrorCodesWarning') }}
-              </p>
-            </div>
-
-            <!-- Error Code Buttons -->
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="code in commonErrorCodes"
-                :key="code.value"
-                type="button"
-                @click="toggleErrorCode(code.value)"
-                :class="[
-                  'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                  selectedErrorCodes.includes(code.value)
-                    ? 'bg-red-100 text-red-700 ring-1 ring-red-500 dark:bg-red-900/30 dark:text-red-400'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-                ]"
-              >
-                {{ code.value }} {{ code.label }}
-              </button>
-            </div>
-
-            <!-- Manual input -->
-            <div class="flex items-center gap-2">
-              <input
-                v-model.number="customErrorCodeInput"
-                type="number"
-                min="100"
-                max="599"
-                class="input flex-1"
-                :placeholder="t('admin.accounts.enterErrorCode')"
-                @keyup.enter="addCustomErrorCode"
-              />
-              <button type="button" @click="addCustomErrorCode" class="btn btn-secondary px-3">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <!-- Selected codes summary -->
-            <div class="flex flex-wrap gap-1.5">
-              <span
-                v-for="code in selectedErrorCodes.sort((a, b) => a - b)"
-                :key="code"
-                class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
-              >
-                {{ code }}
-                <button
-                  type="button"
-                  @click="removeErrorCode(code)"
-                  class="hover:text-red-900 dark:hover:text-red-300"
-                >
-                  <Icon name="x" size="sm" :stroke-width="2" />
-                </button>
-              </span>
-              <span v-if="selectedErrorCodes.length === 0" class="text-xs text-gray-400">
-                {{ t('admin.accounts.noneSelectedUsesDefault') }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- Grok OAuth client-tool prompt cache opt-in -->
-      <div
-        v-if="account.platform === 'grok' && account.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <label class="input-label mb-0">{{ t('admin.accounts.grokClientToolCache.title') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.grokClientToolCache.hint') }}
-            </p>
-          </div>
-          <Toggle
-            v-model="grokClientToolCacheEnabled"
-            data-testid="grok-client-tool-cache-toggle"
-            :aria-label="t('admin.accounts.grokClientToolCache.title')"
-          />
-        </div>
-      </div>
-
-      <!-- Grok OAuth media generation eligibility override -->
-      <div
-        v-if="isGrokOAuthAccount"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="grok-media-eligibility-card"
-      >
-        <div class="space-y-3">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.grokMediaEligibility.title') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.grokMediaEligibility.hint') }}
-            </p>
-          </div>
-          <select
-            v-model="grokMediaEligibilityMode"
-            class="input"
-            data-testid="grok-media-eligibility-mode"
-            :disabled="grokMediaEligibilityLoading"
-          >
-            <option value="auto">{{ t('admin.accounts.grokMediaEligibility.auto') }}</option>
-            <option value="enabled">{{ t('admin.accounts.grokMediaEligibility.enabled') }}</option>
-            <option value="disabled">{{ t('admin.accounts.grokMediaEligibility.disabled') }}</option>
-          </select>
-          <p v-if="grokMediaEligibilityLoading" class="text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.grokMediaEligibility.loading') }}
-          </p>
-          <p v-else-if="grokMediaEligibilityError" class="text-xs text-red-600 dark:text-red-400">
-            {{ grokMediaEligibilityError }}
-          </p>
-          <div v-else-if="grokMediaEligibilityState" class="rounded-lg bg-gray-50 p-3 text-xs dark:bg-dark-700">
-            <span class="font-medium">{{ t('admin.accounts.grokMediaEligibility.current') }}</span>
-            <span class="ml-1" data-testid="grok-media-eligibility-status">
-              {{ grokMediaEligibilityState.eligible ? t('admin.accounts.grokMediaEligibility.eligible') : t('admin.accounts.grokMediaEligibility.ineligible') }}
-              · {{ t(`admin.accounts.grokMediaEligibility.reasons.${grokMediaEligibilityState.reason}`) }}
-            </span>
-          </div>
           <div
-            v-if="grokMediaEligibilityMode === 'enabled'"
-            class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
+            v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
           >
-            <p class="text-xs text-amber-700 dark:text-amber-400">
-              <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.grokMediaEligibility.forceEnableWarning') }}
-            </p>
-          </div>
-          <p v-else-if="grokMediaEligibilityMode === 'auto'" class="text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.grokMediaEligibility.autoHint') }}
-          </p>
-        </div>
-      </div>
-
-      <!-- Grok OAuth Custom Upstream URL (仅改写转发端点，OAuth 授权/刷新不受影响) -->
-      <div
-        v-if="account.platform === 'grok' && account.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="mb-3 flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.grokCustomBaseUrl.title') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.grokCustomBaseUrl.hint') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="grok-custom-base-url-toggle"
-            @click="grokOAuthCustomBaseUrlEnabled = !grokOAuthCustomBaseUrlEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              grokOAuthCustomBaseUrlEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                grokOAuthCustomBaseUrlEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-        <div v-if="grokOAuthCustomBaseUrlEnabled" class="space-y-2">
-          <input
-            v-model="grokOAuthBaseUrl"
-            type="text"
-            class="input"
-            data-testid="grok-custom-base-url-input"
-            :placeholder="t('admin.accounts.grokCustomBaseUrl.placeholder')"
-          />
-          <GrokBaseUrlPresets @select="grokOAuthBaseUrl = $event" />
-        </div>
-      </div>
-
-      <!-- Header Override Section (eligible API-key platforms + grok OAuth) -->
-      <div v-if="headerOverrideCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="mb-3 flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.headerOverride.hint') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="headerOverrideEnabled = !headerOverrideEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-
-        <div v-if="headerOverrideEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-            <p class="text-xs text-blue-700 dark:text-blue-400">
-              <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.headerOverride.info') }}
-            </p>
-          </div>
-
-          <HeaderOverrideEditor
-            :rows="headerOverrideRows"
-            @update:rows="headerOverrideRows = $event"
-          />
-        </div>
-      </div>
-
-      <!-- OpenAI/Grok OAuth Model Mapping (OAuth 类型没有 apikey 容器，需要独立的模型映射区域) -->
-      <div
-        v-if="(account.platform === 'openai' || account.platform === 'grok') && account.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-
-        <div
-          v-if="isOpenAIModelRestrictionDisabled"
-          class="mb-3 rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
-        >
-          <p class="text-xs text-amber-700 dark:text-amber-400">
-            {{ t('admin.accounts.openai.modelRestrictionDisabledByPassthrough') }}
-          </p>
-        </div>
-
-        <template v-else>
-          <!-- Mode Toggle -->
-          <div class="mb-4 flex gap-2">
-            <button
-              type="button"
-              @click="modelRestrictionMode = 'whitelist'"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'whitelist'
-                  ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-            >
-              {{ t('admin.accounts.modelWhitelist') }}
-            </button>
-            <button
-              type="button"
-              @click="modelRestrictionMode = 'mapping'"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'mapping'
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-            >
-              {{ t('admin.accounts.modelMapping') }}
-            </button>
-          </div>
-
-          <!-- Whitelist Mode -->
-          <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
-                t('admin.accounts.supportsAllModels')
-              }}</span>
-            </p>
-          </div>
-
-          <!-- Mapping Mode -->
-          <div v-else>
-            <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-              <p class="text-xs text-purple-700 dark:text-purple-400">
-                {{ t('admin.accounts.mapRequestModels') }}
-              </p>
-            </div>
-
-            <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
-              <div
-                v-for="(mapping, index) in modelMappings"
-                :key="'oauth-' + getModelMappingKey(mapping)"
-                class="flex items-center gap-2"
-              >
-                <input
-                  v-model="mapping.from"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.requestModel')"
-                />
-                <svg
-                  class="h-4 w-4 flex-shrink-0 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M14 5l7 7m0 0l-7 7m7-7H3"
-                  />
-                </svg>
-                <input
-                  v-model="mapping.to"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.actualModel')"
-                />
-                <button
-                  type="button"
-                  @click="removeModelMapping(index)"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.compactMode') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.compactModeDesc') }}
+                </p>
+              </div>
+              <div class="w-44">
+                <Select v-model="openAICompactMode" :options="openAICompactModeOptions" />
               </div>
             </div>
-
-            <button
-              type="button"
-              @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-            >
-              + {{ t('admin.accounts.addMapping') }}
-            </button>
-
-            <!-- Quick Add Buttons -->
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="preset in presetMappings"
-                :key="'oauth-' + preset.label"
-                type="button"
-                @click="addPresetMapping(preset.from, preset.to)"
-                :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
-              >
-                + {{ preset.label }}
-              </button>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- Upstream fields (only for upstream type) -->
-      <div v-if="account.type === 'upstream'" class="space-y-4">
-        <div>
-          <label class="input-label">{{ t('admin.accounts.upstream.baseUrl') }}</label>
-          <input
-            v-model="editBaseUrl"
-            type="text"
-            class="input"
-            placeholder="https://cloudcode-pa.googleapis.com"
-          />
-          <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.upstream.apiKey') }}</label>
-          <input
-            v-model="editApiKey"
-            type="password"
-            class="input font-mono"
-            placeholder="sk-..."
-          />
-          <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
-        </div>
-      </div>
-
-      <!-- Vertex Service Account -->
-      <div v-if="(account.platform === 'gemini' || account.platform === 'anthropic') && account.type === 'service_account'" class="space-y-4">
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label class="input-label">Project ID</label>
-            <input
-              v-model="editVertexProjectId"
-              type="text"
-              class="input font-mono"
-              readonly
-              :placeholder="t('admin.accounts.vertexProjectIdPlaceholder')"
-            />
-            <p class="input-hint">{{ t('admin.accounts.vertexSaJsonEditHint') }}</p>
-          </div>
-          <div>
-            <label class="input-label">Location</label>
-            <select
-              v-model="editVertexLocation"
-              required
-              class="input font-mono"
-            >
-              <optgroup
-                v-for="group in VERTEX_LOCATION_OPTIONS"
-                :key="group.label"
-                :label="group.label"
-              >
-                <option
-                  v-for="option in group.options"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </option>
-              </optgroup>
-            </select>
-            <p class="input-hint">{{ t('admin.accounts.vertexLocationHint') }}</p>
-          </div>
-        </div>
-
-        <!-- Model Restriction Section for Service Account -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-
-          <!-- Mode Toggle -->
-          <div class="mb-4 flex gap-2">
-            <button
-              type="button"
-              @click="modelRestrictionMode = 'whitelist'"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'whitelist'
-                  ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-            >
-              <svg
-                class="mr-1.5 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              {{ t('admin.accounts.modelWhitelist') }}
-            </button>
-            <button
-              type="button"
-              @click="modelRestrictionMode = 'mapping'"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'mapping'
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-            >
-              <svg
-                class="mr-1.5 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-                />
-              </svg>
-              {{ t('admin.accounts.modelMapping') }}
-            </button>
-          </div>
-
-          <!-- Whitelist Mode -->
-          <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" :platform="account?.platform || 'anthropic'" :account-id="account?.id" />
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{
-                t('admin.accounts.supportsAllModels')
-              }}</span>
-            </p>
-          </div>
-
-          <!-- Mapping Mode -->
-          <div v-else>
-            <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-              <p class="text-xs text-purple-700 dark:text-purple-400">
-                <svg
-                  class="mr-1 inline h-4 w-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                {{ t('admin.accounts.mapRequestModels') }}
-              </p>
-            </div>
-
-            <!-- Model Mapping List -->
-            <div v-if="modelMappings.length > 0" class="mb-3 space-y-2">
-              <div
-                v-for="(mapping, index) in modelMappings"
-                :key="getModelMappingKey(mapping)"
-                class="flex items-center gap-2"
-              >
-                <input
-                  v-model="mapping.from"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.requestModel')"
-                />
-                <svg
-                  class="h-4 w-4 flex-shrink-0 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M14 5l7 7m0 0l-7 7m7-7H3"
-                  />
-                </svg>
-                <input
-                  v-model="mapping.to"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.actualModel')"
-                />
-                <button
-                  type="button"
-                  @click="removeModelMapping(index)"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              @click="addModelMapping"
-              class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-            >
-              <svg
-                class="mr-1 inline h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-              {{ t('admin.accounts.addMapping') }}
-            </button>
-
-            <!-- Quick Add Buttons -->
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="preset in presetMappings"
-                :key="preset.label"
-                type="button"
-                @click="addPresetMapping(preset.from, preset.to)"
-                :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
-              >
-                + {{ preset.label }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Bedrock fields (for bedrock type, both SigV4 and API Key modes) -->
-      <div v-if="account.type === 'bedrock'" class="space-y-4">
-        <!-- SigV4 fields -->
-        <template v-if="!isBedrockAPIKeyMode">
-          <div>
-            <label class="input-label">{{ t('admin.accounts.bedrockAccessKeyId') }}</label>
-            <input
-              v-model="editBedrockAccessKeyId"
-              type="text"
-              class="input font-mono"
-              placeholder="AKIA..."
-            />
-          </div>
-          <div>
-            <label class="input-label">{{ t('admin.accounts.bedrockSecretAccessKey') }}</label>
-            <input
-              v-model="editBedrockSecretAccessKey"
-              type="password"
-              class="input font-mono"
-              :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
-            />
-            <p class="input-hint">{{ t('admin.accounts.bedrockSecretKeyLeaveEmpty') }}</p>
-          </div>
-          <div>
-            <label class="input-label">{{ t('admin.accounts.bedrockSessionToken') }}</label>
-            <input
-              v-model="editBedrockSessionToken"
-              type="password"
-              class="input font-mono"
-              :placeholder="t('admin.accounts.bedrockSecretKeyLeaveEmpty')"
-            />
-            <p class="input-hint">{{ t('admin.accounts.bedrockSessionTokenHint') }}</p>
-          </div>
-        </template>
-
-        <!-- API Key field -->
-        <div v-if="isBedrockAPIKeyMode">
-          <label class="input-label">{{ t('admin.accounts.bedrockApiKeyInput') }}</label>
-          <input
-            v-model="editBedrockApiKeyValue"
-            type="password"
-            class="input font-mono"
-            :placeholder="t('admin.accounts.bedrockApiKeyLeaveEmpty')"
-          />
-          <p class="input-hint">{{ t('admin.accounts.bedrockApiKeyLeaveEmpty') }}</p>
-        </div>
-
-        <!-- Shared: Region -->
-        <div>
-          <label class="input-label">{{ t('admin.accounts.bedrockRegion') }}</label>
-          <input
-            v-model="editBedrockRegion"
-            type="text"
-            class="input"
-            placeholder="us-east-1"
-          />
-          <p class="input-hint">{{ t('admin.accounts.bedrockRegionHint') }}</p>
-        </div>
-
-        <!-- Shared: Force Global -->
-        <div>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input
-              v-model="editBedrockForceGlobal"
-              type="checkbox"
-              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
-            />
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.bedrockForceGlobal') }}</span>
-          </label>
-          <p class="input-hint mt-1">{{ t('admin.accounts.bedrockForceGlobalHint') }}</p>
-        </div>
-
-        <!-- Model Restriction for Bedrock -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-
-          <!-- Mode Toggle -->
-          <div class="mb-4 flex gap-2">
-            <button
-              type="button"
-              @click="modelRestrictionMode = 'whitelist'"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'whitelist'
-                  ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-            >
-              {{ t('admin.accounts.modelWhitelist') }}
-            </button>
-            <button
-              type="button"
-              @click="modelRestrictionMode = 'mapping'"
-              :class="[
-                'flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                modelRestrictionMode === 'mapping'
-                  ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
-              ]"
-            >
-              {{ t('admin.accounts.modelMapping') }}
-            </button>
-          </div>
-
-          <!-- Whitelist Mode -->
-          <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" platform="anthropic" />
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
-              <span v-if="allowedModels.length === 0 && modelMappings.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
-            </p>
-          </div>
-
-          <!-- Mapping Mode -->
-          <div v-else class="space-y-3">
-            <div v-for="(mapping, index) in modelMappings" :key="getModelMappingKey(mapping)" class="flex items-center gap-2">
-              <input v-model="mapping.from" type="text" class="input flex-1" :placeholder="t('admin.accounts.fromModel')" />
-              <span class="text-gray-400">→</span>
-              <input v-model="mapping.to" type="text" class="input flex-1" :placeholder="t('admin.accounts.toModel')" />
-              <button type="button" @click="modelMappings.splice(index, 1)" class="text-red-500 hover:text-red-700">
-                <Icon name="trash" size="sm" />
-              </button>
-            </div>
-            <button type="button" @click="modelMappings.push({ from: '', to: '' })" class="btn btn-secondary text-sm">
-              + {{ t('admin.accounts.addMapping') }}
-            </button>
-            <!-- Bedrock Preset Mappings -->
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="preset in bedrockPresets"
-                :key="preset.from"
-                type="button"
-                @click="modelMappings.push({ from: preset.from, to: preset.to })"
-                :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
-              >
-                + {{ preset.label }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Pool Mode Section for Bedrock -->
-        <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.poolModeHint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="poolModeEnabled = !poolModeEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                poolModeEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
+            <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+              <span class="font-medium">{{ t(openAICompactStatusKey) }}</span>
               <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  poolModeEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-            <p class="text-xs text-blue-700 dark:text-blue-400">
-              <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.poolModeInfo') }}
-            </p>
-          </div>
-          <div v-if="poolModeEnabled" class="mt-3">
-            <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
-            <input
-              v-model.number="poolModeRetryCount"
-              type="number"
-              min="0"
-              :max="MAX_POOL_MODE_RETRY_COUNT"
-              step="1"
-              class="input"
-            />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{
-                t('admin.accounts.poolModeRetryCountHint', {
-                  default: DEFAULT_POOL_MODE_RETRY_COUNT,
-                  max: MAX_POOL_MODE_RETRY_COUNT
-                })
-              }}
-            </p>
-          </div>
-          <div v-if="poolModeEnabled" class="mt-3">
-            <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
-            <input
-              v-model="poolModeRetryStatusCodesInput"
-              type="text"
-              class="input"
-              :placeholder="DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ')"
-            />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.poolModeRetryStatusCodesHint', { default: DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ') }) }}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div
-        v-if="account.platform === 'antigravity' && account.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label">{{ t('admin.accounts.antigravityProjectIdLabel') }}</label>
-        <input
-          v-model="antigravityProjectId"
-          data-testid="antigravity-project-id-input"
-          type="text"
-          class="input font-mono"
-          :placeholder="t('admin.accounts.antigravityProjectIdPlaceholder')"
-        />
-        <p class="input-hint">{{ t('admin.accounts.antigravityProjectIdHint') }}</p>
-      </div>
-
-      <!-- Antigravity model restriction (applies to all antigravity types) -->
-      <!-- Antigravity 只支持模型映射模式，不支持白名单模式 -->
-      <div v-if="account.platform === 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
-
-        <!-- Mapping Mode Only (no toggle for Antigravity) -->
-        <div>
-          <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/20">
-            <p class="text-xs text-purple-700 dark:text-purple-400">{{ t('admin.accounts.mapRequestModels') }}</p>
-          </div>
-
-          <div class="mb-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              @click="syncAntigravityUpstreamModels"
-              :disabled="isSyncingAntigravityUpstream || !account?.id"
-              class="rounded-lg border border-emerald-200 px-3 py-1.5 text-sm text-emerald-600 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
-            >
-              {{ isSyncingAntigravityUpstream ? t('admin.accounts.syncUpstreamModelsLoading') : t('admin.accounts.syncUpstreamModels') }}
-            </button>
-          </div>
-
-          <div v-if="antigravityModelMappings.length > 0" class="mb-3 space-y-2">
-            <div
-              v-for="(mapping, index) in antigravityModelMappings"
-              :key="getAntigravityModelMappingKey(mapping)"
-              class="space-y-1"
-            >
-              <div class="flex items-center gap-2">
-                <input
-                  v-model="mapping.from"
-                  type="text"
-                  :class="[
-                    'input flex-1',
-                    !isValidWildcardPattern(mapping.from) ? 'border-red-500 dark:border-red-500' : '',
-                    mapping.to.includes('*') ? '' : ''
-                  ]"
-                  :placeholder="t('admin.accounts.requestModel')"
-                />
-                <svg class="h-4 w-4 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-                <input
-                  v-model="mapping.to"
-                  type="text"
-                  :class="[
-                    'input flex-1',
-                    mapping.to.includes('*') ? 'border-red-500 dark:border-red-500' : ''
-                  ]"
-                  :placeholder="t('admin.accounts.actualModel')"
-                />
-                <button
-                  type="button"
-                  @click="removeAntigravityModelMapping(index)"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
+                v-if="account?.extra?.openai_compact_checked_at"
+                class="ml-2 text-gray-500 dark:text-gray-400"
+              >
+            {{ t('admin.accounts.openai.compactLastChecked') }}:
+            {{ formatDateTime(new Date(String(account.extra.openai_compact_checked_at))) }}
+              </span>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.openai.compactModelMapping') }}</label>
+              <p class="input-hint">{{ t('admin.accounts.openai.compactModelMappingDesc') }}</p>
+              <div v-if="openAICompactModelMappings.length > 0" class="mb-3 space-y-2 max-h-64 overflow-y-auto overscroll-contain pr-1">
+                <div
+                  v-for="(mapping, index) in openAICompactModelMappings"
+                  :key="getOpenAICompactModelMappingKey(mapping)"
+                  class="flex items-center gap-2"
                 >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
+                  <input
+                    v-model="mapping.from"
+                    type="text"
+                    class="input flex-1"
+                    :placeholder="t('admin.accounts.fromModel')"
+                  />
+                  <span class="text-gray-400">→</span>
+                  <input
+                    v-model="mapping.to"
+                    type="text"
+                    class="input flex-1"
+                    :placeholder="t('admin.accounts.toModel')"
+                  />
+                  <button type="button" @click="removeOpenAICompactModelMapping(index)" class="text-red-500 hover:text-red-700">
+                    <Icon name="trash" size="sm" />
+                  </button>
+                </div>
               </div>
-              <!-- 校验错误提示 -->
-              <p v-if="!isValidWildcardPattern(mapping.from)" class="text-xs text-red-500">
-                {{ t('admin.accounts.wildcardOnlyAtEnd') }}
-              </p>
-              <p v-if="mapping.to.includes('*')" class="text-xs text-red-500">
-                {{ t('admin.accounts.targetNoWildcard') }}
-              </p>
+              <button type="button" @click="addOpenAICompactModelMapping" class="btn btn-secondary text-sm">
+            + {{ t('admin.accounts.addMapping') }}
+              </button>
             </div>
           </div>
 
-          <button
-            type="button"
-            @click="addAntigravityModelMapping"
-            class="mb-3 w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-          >
-            <svg class="mr-1 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            {{ t('admin.accounts.addMapping') }}
-          </button>
-
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="preset in antigravityPresetMappings"
-              :key="preset.label"
-              type="button"
-              @click="addAntigravityPresetMapping(preset.from, preset.to)"
-              :class="['rounded-lg px-3 py-1 text-xs transition-colors', preset.color]"
-            >
-              + {{ preset.label }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Temp Unschedulable Rules -->
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
-        <div class="mb-3 flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.tempUnschedulable.title') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.tempUnschedulable.hint') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="tempUnschedEnabled = !tempUnschedEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              tempUnschedEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                tempUnschedEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-
-        <div v-if="tempUnschedEnabled" class="space-y-3">
-          <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-            <p class="text-xs text-blue-700 dark:text-blue-400">
-              <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.tempUnschedulable.notice') }}
-            </p>
-          </div>
-
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="preset in tempUnschedPresets"
-              :key="preset.label"
-              type="button"
-              @click="addTempUnschedRule(preset.rule)"
-              class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
-            >
-              + {{ preset.label }}
-            </button>
-          </div>
-
-          <div v-if="tempUnschedRules.length > 0" class="space-y-3">
-            <div
-              v-for="(rule, index) in tempUnschedRules"
-              :key="getTempUnschedRuleKey(rule)"
-              class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
-            >
-              <div class="mb-2 flex items-center justify-between">
-                <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                  {{ t('admin.accounts.tempUnschedulable.ruleIndex', { index: index + 1 }) }}
-                </span>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    :disabled="index === 0"
-                    @click="moveTempUnschedRule(index, -1)"
-                    class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
-                  >
-                    <Icon name="chevronUp" size="sm" :stroke-width="2" />
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="index === tempUnschedRules.length - 1"
-                    @click="moveTempUnschedRule(index, 1)"
-                    class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
-                  >
-                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    @click="removeTempUnschedRule(index)"
-                    class="rounded p-1 text-red-500 transition-colors hover:text-red-600"
-                  >
-                    <Icon name="x" size="sm" :stroke-width="2" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.errorCode') }}</label>
-                  <input
-                    v-model.number="rule.error_code"
-                    type="number"
-                    min="100"
-                    max="599"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.errorCodePlaceholder')"
-                  />
-                </div>
-                <div>
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.durationMinutes') }}</label>
-                  <input
-                    v-model.number="rule.duration_minutes"
-                    type="number"
-                    min="1"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.durationPlaceholder')"
-                  />
-                </div>
-                <div class="sm:col-span-2">
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.keywords') }}</label>
-                  <input
-                    v-model="rule.keywords"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.keywordsPlaceholder')"
-                  />
-                  <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.keywordsHint') }}</p>
-                </div>
-                <div class="sm:col-span-2">
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
-                  <input
-                    v-model="rule.description"
-                    type="text"
-                    class="input"
-                    :placeholder="t('admin.accounts.tempUnschedulable.descriptionPlaceholder')"
-                  />
-                </div>
-              </div>
+          <AccountGroupModelLimits
+            v-model="groupAllowedModels"
+            :groups="groupsForModelLimits"
+            :platform="account?.platform"
+            :account-id="account?.id"
+          />
+        </template>
+        <template #scheduling>
+          <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
+              <input v-model.number="form.concurrency" type="number" min="1" class="input"
+                @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
             </div>
-          </div>
-
-          <button
-            type="button"
-            @click="addTempUnschedRule()"
-            class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-          >
-            <svg
-              class="mr-1 inline h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            {{ t('admin.accounts.tempUnschedulable.addRule') }}
-          </button>
-        </div>
-      </div>
-
-
-      <div
-        v-if="supportsAccountSchedulingThresholdOverride"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="account-scheduling-threshold-section"
-      >
-        <div class="mb-3 flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.accountSchedulingThresholdOverride') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.accountSchedulingThresholdOverrideHint') }}
-            </p>
-          </div>
-          <input
-            v-model="accountSchedulingThresholdOverrideEnabled"
-            data-testid="account-scheduling-threshold-override-enabled"
-            type="checkbox"
-            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-          />
-        </div>
-        <div v-if="accountSchedulingThresholdOverrideEnabled">
-          <label class="input-label">{{ t('admin.accounts.accountSchedulingThresholdOverrideValue') }}</label>
-          <input
-            v-model.number="accountSchedulingThresholdOverrideValue"
-            data-testid="account-scheduling-threshold-override-value"
-            type="number"
-            min="1"
-            max="100"
-            class="input"
-          />
-          <p class="input-hint">{{ t('admin.accounts.accountSchedulingThresholdOverrideDisabledHint') }}</p>
-        </div>
-      </div>
-
-      <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
-      <div
-        v-if="account?.platform === 'anthropic' || account?.platform === 'antigravity'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{
-              t('admin.accounts.interceptWarmupRequests')
-            }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.interceptWarmupRequestsDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="interceptWarmupRequests = !interceptWarmupRequests"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              interceptWarmupRequests ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                interceptWarmupRequests ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <div v-if="!isSparkShadow && !authStore.isObserver">
-        <div class="mb-1 flex items-center gap-2">
-          <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
-          <ProxyAdBanner />
-        </div>
-        <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
-      </div>
-
-      <UpstreamRequestIdHeaderField
-        v-model="upstreamRequestIdHeader"
-        :platform="account.platform"
-        :type="account.type"
-      />
-
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div>
-          <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
-          <input v-model.number="form.concurrency" type="number" min="1" class="input"
-            @input="form.concurrency = Math.max(1, form.concurrency || 1)" />
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.loadFactor') }}</label>
-          <input v-model.number="form.load_factor" type="number" min="1"
-            class="input" :placeholder="String(form.concurrency || 1)"
-            @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
-          <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.priority') }}</label>
-          <input
-            v-model.number="form.priority"
-            type="number"
-            min="1"
-            class="input"
-            data-tour="account-form-priority"
-          />
-          <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
-          <input
-            v-model.number="form.rate_multiplier"
-            type="number"
-            min="0"
-            step="0.001"
-            class="input disabled:cursor-not-allowed disabled:opacity-60"
-            data-testid="account-rate-multiplier"
-            :disabled="upstreamBillingRateSyncEnabled"
-          />
-          <p class="input-hint">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.loadFactor') }}</label>
+              <input v-model.number="form.load_factor" type="number" min="1"
+                class="input" :placeholder="String(form.concurrency || 1)"
+                @input="form.load_factor = (form.load_factor &amp;&amp; form.load_factor >= 1) ? form.load_factor : null" />
+              <p class="input-hint">{{ t('admin.accounts.loadFactorHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.priority') }}</label>
+              <input
+                v-model.number="form.priority"
+                type="number"
+                min="1"
+                class="input"
+                data-tour="account-form-priority"
+              />
+              <p class="input-hint">{{ t('admin.accounts.priorityHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.billingRateMultiplier') }}</label>
+              <input
+                v-model.number="form.rate_multiplier"
+                type="number"
+                min="0"
+                step="0.001"
+                class="input disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="account-rate-multiplier"
+                :disabled="upstreamBillingRateSyncEnabled"
+              />
+              <p class="input-hint">
             {{
               t(
                 upstreamBillingRateSyncEnabled
@@ -1705,1516 +1398,1850 @@
                   : 'admin.accounts.billingRateMultiplierHint'
               )
             }}
-          </p>
+              </p>
+              <div
+                v-if="account?.type === 'apikey'"
+                class="mt-3 flex items-center justify-between gap-3"
+              >
+                <div class="min-w-0">
+                  <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
+                {{ t('admin.accounts.upstreamBilling.syncRate') }}
+                  </p>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.upstreamBilling.syncRateHint') }}
+                  </p>
+                </div>
+                <Toggle
+                  :model-value="upstreamBillingRateSyncEnabled"
+                  data-testid="upstream-billing-rate-sync"
+                  :aria-label="t('admin.accounts.upstreamBilling.syncRate')"
+                  @update:model-value="handleUpstreamBillingRateSyncChange"
+                />
+              </div>
+            </div>
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-1">
+                <label class="input-label mb-0" for="account-cost-multiplier">{{ t('admin.accounts.costMultiplier') }}</label>
+                <div v-if="account?.type === 'apikey'" class="flex shrink-0 items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                  <span>{{ t('admin.accounts.costMultiplierAutoSync') }}</span>
+                  <Toggle
+                    v-model="costMultiplierAutoSync"
+                    data-testid="account-cost-auto-sync"
+                    :aria-label="t('admin.accounts.costMultiplierAutoSync')"
+                  />
+                </div>
+              </div>
+              <input
+                id="account-cost-multiplier"
+                v-model.number="costMultiplier"
+                type="number"
+                min="0"
+                max="1000000"
+                step="0.001"
+                required
+                class="input"
+                data-testid="account-cost-multiplier"
+              />
+              <p class="input-hint">{{ t('admin.accounts.costMultiplierHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.groupBillingRateMultiplier') }}</label>
+              <input
+                v-model.number="form.group_rate_multiplier"
+                type="number"
+                min="0"
+                step="0.01"
+                class="input"
+                data-testid="account-group-rate-multiplier"
+              />
+              <p class="input-hint">{{ t('admin.accounts.groupBillingRateMultiplierHint') }}</p>
+            </div>
+          </div>
+
+          <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+            <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
+            <input v-model="expiresAtInput" type="datetime-local" class="input" />
+            <div class="mt-2 flex gap-2">
+              <button type="button" class="btn btn-secondary btn-sm" @click="form.expires_at = getAccountExpiryTimestamp(1)">
+            {{ t('payment.oneMonth') }}
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="form.expires_at = getAccountExpiryTimestamp(12)">
+            {{ t('payment.oneYear') }}
+              </button>
+            </div>
+            <p class="input-hint">
+          {{ t('admin.accounts.expiresAtHint') }}
+          {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
+            </p>
+          </div>
+
           <div
             v-if="account?.type === 'apikey'"
-            class="mt-3 flex items-center justify-between gap-3"
+            class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
           >
-            <div class="min-w-0">
-              <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
-                {{ t('admin.accounts.upstreamBilling.syncRate') }}
-              </p>
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.upstreamBilling.syncRateHint') }}
+            {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
               </p>
             </div>
             <Toggle
-              :model-value="upstreamBillingRateSyncEnabled"
-              data-testid="upstream-billing-rate-sync"
-              :aria-label="t('admin.accounts.upstreamBilling.syncRate')"
-              @update:model-value="handleUpstreamBillingRateSyncChange"
+              :model-value="upstreamBillingAutoProbeEnabled"
+              data-testid="upstream-billing-auto-probe"
+              :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
+              @update:model-value="handleUpstreamBillingAutoProbeChange"
             />
           </div>
-        </div>
-        <div>
-          <div class="mb-2 flex items-center justify-between gap-1">
-            <label class="input-label mb-0" for="account-cost-multiplier">{{ t('admin.accounts.costMultiplier') }}</label>
-            <div v-if="account?.type === 'apikey'" class="flex shrink-0 items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-              <span>{{ t('admin.accounts.costMultiplierAutoSync') }}</span>
-              <Toggle
-                v-model="costMultiplierAutoSync"
-                data-testid="account-cost-auto-sync"
-                :aria-label="t('admin.accounts.costMultiplierAutoSync')"
-              />
-            </div>
-          </div>
-          <input
-            id="account-cost-multiplier"
-            v-model.number="costMultiplier"
-            type="number"
-            min="0"
-            max="1000000"
-            step="0.001"
-            required
-            class="input"
-            data-testid="account-cost-multiplier"
-          />
-          <p class="input-hint">{{ t('admin.accounts.costMultiplierHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.groupBillingRateMultiplier') }}</label>
-          <input
-            v-model.number="form.group_rate_multiplier"
-            type="number"
-            min="0"
-            step="0.01"
-            class="input"
-            data-testid="account-group-rate-multiplier"
-          />
-          <p class="input-hint">{{ t('admin.accounts.groupBillingRateMultiplierHint') }}</p>
-        </div>
-      </div>
-      <!-- OpenAI OAuth RPM limit -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <AccountRpmSettings
-          v-model:enabled="rpmLimitEnabled"
-          v-model:base-rpm="baseRpm"
-          strict
-        />
-      </div>
 
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
-        <input v-model="expiresAtInput" type="datetime-local" class="input" />
-        <div class="mt-2 flex gap-2">
-          <button type="button" class="btn btn-secondary btn-sm" @click="form.expires_at = getAccountExpiryTimestamp(1)">
-            {{ t('payment.oneMonth') }}
-          </button>
-          <button type="button" class="btn btn-secondary btn-sm" @click="form.expires_at = getAccountExpiryTimestamp(12)">
-            {{ t('payment.oneYear') }}
-          </button>
-        </div>
-        <p class="input-hint">
-          {{ t('admin.accounts.expiresAtHint') }}
-          {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
-        </p>
-      </div>
-
-      <div v-if="account?.platform === 'openai' && account?.type === 'apikey'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="flex items-center gap-2">
-          <input v-model="copilotSDKEnabled" type="checkbox" data-testid="copilot-sdk-toggle" />
-          <span>Copilot SDK</span>
-        </label>
-        <p class="input-hint">{{ t('admin.accounts.openai.copilotSDKDesc') }}</p>
-      </div>
-
-      <div v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.excelBPS') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSDesc') }}</p>
-          </div>
-        </div>
-        <ExcelBPSModeSwitches :enabled="excelBPSEnabled" :mode="excelBPSMode"
-          :loading="bpsDefaults.loading.value" :failed="bpsDefaults.failed.value" :applied="bpsDefaults.applied.value"
-          :available="!authStore.isObserver" prefix="excel-bps" @toggle="bpsDefaults.toggle" />
-        <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
-          <label class="flex items-center gap-2 text-sm">
-            <input v-model="excelBPSAllModels" type="checkbox" data-testid="excel-bps-all-models" />
-            <span>{{ t('admin.accounts.openai.excelBPSAllModels') }}</span>
-          </label>
-          <div v-if="!excelBPSAllModels" data-testid="excel-bps-model-selection">
-            <label class="input-label">{{ t('admin.accounts.openai.excelBPSModels') }}</label>
-            <ModelWhitelistSelector v-model="excelBPSModels" platform="openai" />
-            <button type="button" class="btn btn-secondary" data-testid="excel-bps-astra-only"
-              @click="excelBPSModels = ['gpt-6-astra']">{{ t('admin.accounts.openai.excelBPSAstraOnly') }}</button>
-            <p class="input-hint">{{ t('admin.accounts.openai.excelBPSModelsHint') }}</p>
-          </div>
-        </div>
-        <p v-if="excelBPSEnabled" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSNotice') }}</p>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSOmitUnsupportedTools" type="checkbox"
-              data-testid="excel-bps-omit-unsupported-tools"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedTools') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedToolsDesc') }}</p>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSIgnoreImages" type="checkbox"
-              data-testid="excel-bps-ignore-images"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreImages') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreImagesDesc') }}</p>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSIgnoreEncryptedContent" type="checkbox"
-              data-testid="excel-bps-ignore-encrypted-content"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContent') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContentDesc') }}</p>
-        </div>
-        <div v-if="excelBPSEnabled || excelBPS403RecoveryPending" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSAutoDisableOn403" type="checkbox"
-              data-testid="excel-bps-auto-disable-on-403"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403Desc') }}</p>
-        </div>
-        <div v-if="excelBPSEnabled || excelBPS403RecoveryPending" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSAutoRecoverOn403" type="checkbox" :disabled="!excelBPSAutoDisableOn403"
-              data-testid="excel-bps-auto-recover-on-403"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500 disabled:opacity-50" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403Desc') }}</p>
-          <div v-if="excelBPSAutoRecoverOn403 && excelBPSAutoDisableOn403" class="mt-2">
-            <label class="block space-y-1">
-              <span class="text-sm">{{ t('admin.accounts.openai.excelBPS403RecoveryInterval') }}</span>
-              <input v-model.number="excelBPSRecoveryIntervalMinutes" type="number" min="1" :max="MAX_BPS_RECOVERY_INTERVAL_MINUTES" step="1" required
-                data-testid="excel-bps-recovery-interval" class="input w-40" />
-            </label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPS403RecoveryIntervalHint') }}</p>
-          </div>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSAutoMoveOn403" type="checkbox"
-              data-testid="excel-bps-auto-move-on-403"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403Desc') }}</p>
-          <div v-if="excelBPSAutoMoveOn403" class="mt-2">
-            <label class="input-label">{{ t('admin.accounts.openai.excelBPS403TargetGroup') }}</label>
-            <Select v-model="excelBPS403TargetGroupID" :options="excelBPS403GroupOptions"
-              :aria-label="t('admin.accounts.openai.excelBPS403TargetGroup')"
-              data-testid="excel-bps-403-target-group" />
-          </div>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSMihomo" type="checkbox" data-testid="excel-bps-mihomo"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSMihomo') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSMihomoDesc') }}</p>
-          <div v-if="excelBPSMihomo" class="mt-2 flex flex-wrap items-center gap-4" role="radiogroup"
-            :aria-label="t('admin.accounts.openai.excelBPSProxySource')">
-            <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSProxySource') }}</span>
-            <label class="flex items-center gap-1.5 text-sm">
-              <input v-model="excelBPSProxySource" type="radio" value="mihomo" data-testid="excel-bps-proxy-source-mihomo"
-                class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-              {{ t('admin.accounts.openai.excelBPSProxySourceMihomo') }}
-            </label>
-            <label class="flex items-center gap-1.5 text-sm">
-              <input v-model="excelBPSProxySource" type="radio" value="ip_pool" data-testid="excel-bps-proxy-source-ip-pool"
-                class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-              {{ t('admin.accounts.openai.excelBPSProxySourceIPPool') }}
-            </label>
-          </div>
-          <p v-if="excelBPSMihomo && excelBPSProxySource === 'ip_pool'" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.excelBPSProxySourceIPPoolDesc') }}
-          </p>
-        </div>
-        <div v-if="excelBPSEnabled" class="mt-3">
-          <label class="flex items-center gap-2">
-            <input v-model="excelBPSCacheCreationAsInput" type="checkbox"
-              data-testid="excel-bps-cache-creation-as-input"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
-            <span class="text-sm">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInput') }}</span>
-          </label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInputDesc') }}</p>
-        </div>
-      </div>
-
-      <AccountAutoBPSSection v-if="autoBPSSupported" v-model:draft="autoBPS.draft.value" :groups="groups"
-        :loading="autoBPS.loading.value" :load-error="autoBPS.loadError.value" :has-rule="!!autoBPS.rule.value"
-        :conflicting-rule-id="autoBPS.conflictingRule.value?.id" />
-
-      <!-- OpenAI 自动透传开关（OAuth/API Key） -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.oauthPassthrough') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="openaiPassthroughEnabled = !openaiPassthroughEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              openaiPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
+          <!-- OpenAI API 长上下文计费开关 -->
+          <div
+            v-if="account?.platform === 'openai' && !isSparkShadow && !hideAccountLongContextBilling && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
           >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                openaiPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.flattenNamespaces') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.flattenNamespacesDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="edit-openai-flatten-namespaces-toggle"
-            @click="openaiFlattenNamespacesEnabled = !openaiFlattenNamespacesEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              openaiFlattenNamespacesEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                openaiFlattenNamespacesEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <!-- OpenAI Codex hosted image_generation bridge policy -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="overflow-hidden rounded-lg border border-sky-100 bg-sky-50/60 shadow-sm dark:border-sky-900/50 dark:bg-sky-950/20">
-          <div class="flex items-start gap-3 px-4 py-3">
-            <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-sky-600 shadow-sm ring-1 ring-sky-100 dark:bg-dark-800 dark:text-sky-300 dark:ring-sky-900/60">
-              <Icon name="sparkles" size="sm" />
-            </div>
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <label class="input-label mb-0">{{ t('admin.accounts.openai.codexImageTool') }}</label>
-                <span
-                  class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                  :class="codexImageToolBadgeClass"
-                >
-                  {{ codexImageToolBadgeLabel }}
-                </span>
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.longContextBilling') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.longContextBillingDesc') }}
+                </p>
               </div>
-              <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                {{ t('admin.accounts.openai.codexImageToolDesc') }}
-              </p>
-            </div>
-          </div>
-          <div class="border-t border-sky-100 bg-white/70 p-2 dark:border-sky-900/50 dark:bg-dark-800/70">
-            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
-                v-for="option in codexImageToolOptions"
-                :key="option.value"
                 type="button"
-                :data-testid="`codex-image-tool-${option.value}`"
-                @click="codexImageToolMode = option.value"
+                data-testid="openai-long-context-billing-toggle"
+                role="switch"
+                :aria-checked="openAILongContextBillingEnabled"
+                @click="openAILongContextBillingEnabled = !openAILongContextBillingEnabled"
                 :class="[
-                  'group flex min-h-[62px] items-start gap-2 rounded-md border px-3 py-2 text-left transition-all',
-                  codexImageToolMode === option.value
-                    ? option.selectedCardClass
-                    : 'border-transparent bg-transparent text-slate-600 hover:border-gray-200 hover:bg-gray-50 dark:text-slate-300 dark:hover:border-dark-500 dark:hover:bg-dark-700'
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  openAILongContextBillingEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
                 ]"
               >
                 <span
                   :class="[
-                    'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
-                    codexImageToolMode === option.value
-                      ? option.selectedDotClass
-                      : 'border-gray-300 text-transparent group-hover:border-gray-400 dark:border-dark-500'
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    openAILongContextBillingEnabled ? 'translate-x-5' : 'translate-x-0'
                   ]"
-                >
-                  <Icon name="check" size="xs" :stroke-width="2" />
-                </span>
-                <span class="min-w-0">
-                  <span class="block text-sm font-medium">{{ option.label }}</span>
-                  <span class="mt-0.5 block text-xs leading-4 text-slate-500 dark:text-slate-400">{{ option.description }}</span>
-                </span>
+                />
               </button>
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.wsMode') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.wsModeDesc') }}
-            </p>
-            <p v-if="openAIWSModeHintKey" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t(openAIWSModeHintKey) }}
-            </p>
-          </div>
-          <div class="w-52">
-            <Select v-model="openaiResponsesWebSocketV2Mode" data-testid="edit-openai-ws-mode-select" :options="openAIWSModeOptions" />
-          </div>
-        </div>
-      </div>
-
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
-        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div>
-          <label class="input-label mb-0">{{ t('admin.accounts.openai.wsSseAcceleration') }}</label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.wsSseAccelerationDesc') }}
-          </p>
-        </div>
-        <Toggle
-          v-model="openaiOAuthWSSSEAcceleration"
-          data-testid="openai-ws-sse-acceleration"
-          :aria-label="t('admin.accounts.openai.wsSseAcceleration')"
-        />
-      </div>
-
-      <!-- OpenAI APIKey Responses API support mode -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
-        class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.responsesMode') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.responsesModeDesc') }}
-            </p>
-          </div>
-          <div class="w-56">
-            <Select
-              v-model="openAIResponsesMode"
-              :options="openAIResponsesModeOptions"
-              :disabled="!openAITextGenerationCapabilityEnabled"
-              data-testid="openai-responses-mode-select"
-            />
-          </div>
-        </div>
-        <div
-          v-if="openAITextGenerationCapabilityEnabled"
-          class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
-        >
-          <span class="font-medium">{{ t(openAIResponsesStatusKey) }}</span>
-        </div>
-        <div
-          v-else
-          class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
-          data-testid="openai-responses-mode-not-applicable"
-        >
-          {{ t('admin.accounts.openai.responsesModeTextDisabledHint') }}
-        </div>
-        <div>
-          <label class="input-label mb-2 block">{{ t('admin.accounts.openai.endpointCapabilities') }}</label>
-          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <label
-              v-for="option in openAIEndpointCapabilityOptions"
-              :key="option.value"
-              class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
-            >
-              <input
-                type="checkbox"
-                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
-                :data-testid="`openai-endpoint-capability-${option.value}`"
-                :checked="openAIEndpointCapabilities.includes(option.value)"
-                @change="toggleOpenAIEndpointCapability(option.value, $event)"
-              />
-              <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
-            </label>
-          </div>
-          <p class="input-hint">{{ t('admin.accounts.openai.endpointCapabilitiesDesc') }}</p>
-        </div>
-      </div>
-
-      <!-- OpenAI APIKey images: backfill b64_json from url -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
-        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div>
-          <label class="input-label mb-0">{{ t('admin.accounts.openai.imagesUrlToB64Json') }}</label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.imagesUrlToB64JsonDesc') }}
-          </p>
-        </div>
-        <button
-          type="button"
-          data-testid="openai-images-url-to-b64-json-toggle"
-          role="switch"
-          :aria-checked="openAIImagesUrlToB64JsonEnabled"
-          @click="openAIImagesUrlToB64JsonEnabled = !openAIImagesUrlToB64JsonEnabled"
-          :class="[
-            'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-            openAIImagesUrlToB64JsonEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-          ]"
-        >
-          <span
-            :class="[
-              'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-              openAIImagesUrlToB64JsonEnabled ? 'translate-x-5' : 'translate-x-0'
-            ]"
-          />
-        </button>
-      </div>
-
-      <div
-        v-if="account?.type === 'apikey'"
-        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div>
-          <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
-          </p>
-        </div>
-        <Toggle
-          :model-value="upstreamBillingAutoProbeEnabled"
-          data-testid="upstream-billing-auto-probe"
-          :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
-          @update:model-value="handleUpstreamBillingAutoProbeChange"
-        />
-      </div>
-
-      <OllamaCloudUsageSettings
-        v-if="account?.ollama_cloud_usage?.eligible"
-        :account="account"
-        @updated="handleOllamaCloudUsageUpdated"
-      />
-
-      <section
-        v-if="account?.opencode_go_usage?.eligible"
-        class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="opencode-go-usage-settings"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
-              {{ t('admin.accounts.opencodeGo.title') }}
-            </h3>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.opencodeGo.panelHint') }}
-            </p>
-          </div>
-          <span
-            class="whitespace-nowrap rounded px-2 py-1 text-xs font-medium"
-            :class="opencodeGoStatusOk
-              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-              : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'"
-          >
-            {{ opencodeGoStatusLabel }}
-          </span>
-        </div>
-
-        <div v-if="opencodeGoLoading" class="flex h-20 items-center justify-center text-gray-400">
-          <Icon name="refresh" size="sm" class="animate-spin" />
-        </div>
-        <template v-else>
+        </template>
+        <template #protocol>
+          <!-- Grok OAuth client-tool prompt cache opt-in -->
           <div
-            v-if="opencodeGoSnapshot"
-            class="border-y border-gray-100 py-3 dark:border-dark-700"
-            data-testid="opencode-go-usage-details"
+            v-if="account.platform === 'grok' && account.type === 'oauth'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
           >
-            <div class="grid grid-cols-[minmax(4rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-              <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.rolling') }}</span>
-              <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoWindowSummary(opencodeGoSnapshot.data?.rolling) }}</span>
-              <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.weekly') }}</span>
-              <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoWindowSummary(opencodeGoSnapshot.data?.weekly) }}</span>
-              <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.monthly') }}</span>
-              <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoWindowSummary(opencodeGoSnapshot.data?.monthly) }}</span>
-              <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.status') }}</span>
-              <span class="break-words font-medium text-gray-900 dark:text-white">{{ opencodeGoStatusLabel }}</span>
-              <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.updatedAt') }}</span>
-              <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoFormatDate(opencodeGoSnapshot.fetched_at || opencodeGoSnapshot.last_attempt_at) }}</span>
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <label class="input-label mb-0">{{ t('admin.accounts.grokClientToolCache.title') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.grokClientToolCache.hint') }}
+                </p>
+              </div>
+              <Toggle
+                v-model="grokClientToolCacheEnabled"
+                data-testid="grok-client-tool-cache-toggle"
+                :aria-label="t('admin.accounts.grokClientToolCache.title')"
+              />
             </div>
-            <p
-              v-if="opencodeGoSnapshot.last_error"
-              class="mt-2 break-words border-t border-gray-100 pt-2 text-xs text-amber-700 dark:border-dark-700 dark:text-amber-300"
-            >
-              {{ t(`admin.accounts.opencodeGo.errors.${opencodeGoSnapshot.last_error}`, opencodeGoSnapshot.last_error) }}
-            </p>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              :disabled="opencodeGoRefreshing"
-              data-testid="opencode-go-refresh"
-              @click="refreshOpenCodeGoUsage"
-            >
-              <Icon name="refresh" size="xs" class="mr-1.5" :class="{ 'animate-spin': opencodeGoRefreshing }" />
-              {{ t('admin.accounts.opencodeGo.refreshNow') }}
-            </button>
+          <!-- Intercept Warmup Requests (Anthropic/Antigravity) -->
+          <div
+            v-if="account?.platform === 'anthropic' || account?.platform === 'antigravity'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{
+              t('admin.accounts.interceptWarmupRequests')
+            }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.interceptWarmupRequestsDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="interceptWarmupRequests = !interceptWarmupRequests"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  interceptWarmupRequests ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    interceptWarmupRequests ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
           </div>
 
-          <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+          <div v-if="account?.platform === 'openai' && account?.type === 'apikey'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+            <label class="flex items-center gap-2">
+              <input v-model="copilotSDKEnabled" type="checkbox" data-testid="copilot-sdk-toggle" />
+              <span>Copilot SDK</span>
+            </label>
+            <p class="input-hint">{{ t('admin.accounts.openai.copilotSDKDesc') }}</p>
+          </div>
+
+          <!-- OpenAI 自动透传开关（OAuth/API Key） -->
+          <div
+            v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.oauthPassthrough') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.oauthPassthroughDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="openaiPassthroughEnabled = !openaiPassthroughEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  openaiPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    openaiPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.flattenNamespaces') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.flattenNamespacesDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid="edit-openai-flatten-namespaces-toggle"
+                @click="openaiFlattenNamespacesEnabled = !openaiFlattenNamespacesEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  openaiFlattenNamespacesEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    openaiFlattenNamespacesEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- OpenAI WS Mode 三态（off/ctx_pool/passthrough） -->
+          <div
+            v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.wsMode') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.wsModeDesc') }}
+                </p>
+                <p v-if="openAIWSModeHintKey" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t(openAIWSModeHintKey) }}
+                </p>
+              </div>
+              <div class="w-52">
+                <Select v-model="openaiResponsesWebSocketV2Mode" data-testid="edit-openai-ws-mode-select" :options="openAIWSModeOptions" />
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+            class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
             <div>
-              <label class="text-sm font-medium text-gray-900 dark:text-white">
-                {{ t('admin.accounts.opencodeGo.autoRefresh') }}
-              </label>
+              <label class="input-label mb-0">{{ t('admin.accounts.openai.wsSseAcceleration') }}</label>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.opencodeGo.autoRefreshHint') }}
+            {{ t('admin.accounts.openai.wsSseAccelerationDesc') }}
               </p>
             </div>
             <Toggle
-              :model-value="opencodeGoState?.auto_refresh_enabled ?? false"
-              :disabled="opencodeGoSaving"
-              data-testid="opencode-go-auto-refresh"
-              @update:model-value="setOpenCodeGoAutoRefresh"
+              v-model="openaiOAuthWSSSEAcceleration"
+              data-testid="openai-ws-sse-acceleration"
+              :aria-label="t('admin.accounts.openai.wsSseAcceleration')"
             />
+          </div>
+
+          <!-- OpenAI APIKey Responses API support mode -->
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+            class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.responsesMode') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.responsesModeDesc') }}
+                </p>
+              </div>
+              <div class="w-56">
+                <Select
+                  v-model="openAIResponsesMode"
+                  :options="openAIResponsesModeOptions"
+                  :disabled="!openAITextGenerationCapabilityEnabled"
+                  data-testid="openai-responses-mode-select"
+                />
+              </div>
+            </div>
+            <div
+              v-if="openAITextGenerationCapabilityEnabled"
+              class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+            >
+              <span class="font-medium">{{ t(openAIResponsesStatusKey) }}</span>
+            </div>
+            <div
+              v-else
+              class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+              data-testid="openai-responses-mode-not-applicable"
+            >
+          {{ t('admin.accounts.openai.responsesModeTextDisabledHint') }}
+            </div>
+            <div>
+              <label class="input-label mb-2 block">{{ t('admin.accounts.openai.endpointCapabilities') }}</label>
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label
+                  v-for="option in openAIEndpointCapabilityOptions"
+                  :key="option.value"
+                  class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
+                >
+                  <input
+                    type="checkbox"
+                    class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+                    :data-testid="`openai-endpoint-capability-${option.value}`"
+                    :checked="openAIEndpointCapabilities.includes(option.value)"
+                    @change="toggleOpenAIEndpointCapability(option.value, $event)"
+                  />
+                  <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
+                </label>
+              </div>
+              <p class="input-hint">{{ t('admin.accounts.openai.endpointCapabilitiesDesc') }}</p>
+            </div>
+          </div>
+
+          <!-- Anthropic API Key 自动透传开关 -->
+          <div
+            v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.anthropic.apiKeyPassthrough') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropic.apiKeyPassthroughDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="anthropicPassthroughEnabled = !anthropicPassthroughEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  anthropicPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    anthropicPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- Anthropic API Key: Web Search Emulation (hidden when global disabled) -->
+          <div
+            v-if="account?.platform === 'anthropic' && account?.type === 'apikey' && webSearchGlobalEnabled"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.anthropic.webSearchEmulation') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropic.webSearchEmulationDesc') }}
+                </p>
+              </div>
+              <select v-model="webSearchEmulationMode" class="input w-24 text-sm">
+                <option value="default">{{ t('admin.accounts.anthropic.webSearchDefault') }}</option>
+                <option value="enabled">{{ t('admin.accounts.anthropic.webSearchEnabled') }}</option>
+                <option value="disabled">{{ t('admin.accounts.anthropic.webSearchDisabled') }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div
+            v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.codexCLIOnly') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexCLIOnlyDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="codexCLIOnlyEnabled = !codexCLIOnlyEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  codexCLIOnlyEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    codexCLIOnlyEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+            <div
+              v-if="codexCLIOnlyEnabled"
+              class="mt-4 flex items-center justify-between border-l-2 border-gray-200 pl-4 dark:border-dark-600"
+            >
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.codexCLIOnlyAppServer') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexCLIOnlyAppServerDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="codexCLIOnlyAppServerEnabled = !codexCLIOnlyAppServerEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  codexCLIOnlyAppServerEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    codexCLIOnlyAppServerEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- Codex 292 门票状态（仅 OpenAI OAuth） -->
+          <div
+            v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
+            </p>
+            <div class="mt-3 space-y-1.5">
+              <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="flex items-center justify-between text-sm">
+                <span class="font-medium">{{ ticket.model }}</span>
+                <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
+              {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
+                </span>
+                <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
+              {{ t('admin.accounts.openai.codexTurnTicketPaused') }}
+                </span>
+                <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
+                <div v-if="ticket.probe" class="ml-2 text-xs text-gray-500">
+              {{ t('admin.accounts.openai.ticketProbe.' + ticket.probe.result) }} · HTTP {{ ticket.probe.http_status || '—' }}
+                  <div>{{ new Date(ticket.probe.checked_at).toLocaleString() }}</div>
+                  <div v-if="ticket.probe.next_probe_at">{{ t('admin.accounts.openai.ticketProbeNext') }} {{ new Date(ticket.probe.next_probe_at).toLocaleString() }}</div>
+                  <div v-if="ticket.standby_expires_at">{{ t('admin.accounts.openai.ticketStandbyExpires') }} {{ new Date(ticket.standby_expires_at).toLocaleString() }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'oauth'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.codexFingerprintMode') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexFingerprintModeDesc') }}
+                </p>
+              </div>
+              <div class="w-52 flex-shrink-0">
+                <Select v-model="codexFingerprintMode" data-testid="edit-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
+              </div>
+            </div>
           </div>
         </template>
-      </section>
-
-      <!-- Anthropic API Key 自动透传开关 -->
-      <div
-        v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.anthropic.apiKeyPassthrough') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.anthropic.apiKeyPassthroughDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="anthropicPassthroughEnabled = !anthropicPassthroughEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              anthropicPassthroughEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
+        <template #media>
+          <!-- Grok OAuth media generation eligibility override -->
+          <div
+            v-if="isGrokOAuthAccount"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+            data-testid="grok-media-eligibility-card"
           >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                anthropicPassthroughEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <div
-        v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.anthropic.apiKeyAuthScheme') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.anthropic.apiKeyAuthSchemeDesc') }}
-            </p>
-          </div>
-          <select v-model="anthropicAPIKeyAuthScheme" class="input w-52 text-sm">
-            <option value="x_api_key">{{ t('admin.accounts.anthropic.apiKeyAuthSchemeXApiKey') }}</option>
-            <option value="authorization_bearer">{{ t('admin.accounts.anthropic.apiKeyAuthSchemeBearer') }}</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Anthropic API Key: Web Search Emulation (hidden when global disabled) -->
-      <div
-        v-if="account?.platform === 'anthropic' && account?.type === 'apikey' && webSearchGlobalEnabled"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.anthropic.webSearchEmulation') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.anthropic.webSearchEmulationDesc') }}
-            </p>
-          </div>
-          <select v-model="webSearchEmulationMode" class="input w-24 text-sm">
-            <option value="default">{{ t('admin.accounts.anthropic.webSearchDefault') }}</option>
-            <option value="enabled">{{ t('admin.accounts.anthropic.webSearchEnabled') }}</option>
-            <option value="disabled">{{ t('admin.accounts.anthropic.webSearchDisabled') }}</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
-      <div
-        v-if="account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
-      >
-        <div class="mb-3">
-          <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.quotaControl.hint') }}
-          </p>
-        </div>
-        <QuotaLimitCard
-          :totalLimit="editQuotaLimit"
-          :dailyLimit="editQuotaDailyLimit"
-          :weeklyLimit="editQuotaWeeklyLimit"
-          :dailyResetMode="editDailyResetMode"
-          :dailyResetHour="editDailyResetHour"
-          :weeklyResetMode="editWeeklyResetMode"
-          :weeklyResetDay="editWeeklyResetDay"
-          :weeklyResetHour="editWeeklyResetHour"
-          :resetTimezone="editResetTimezone"
-          :quotaNotifyGlobalEnabled="quotaNotifyGlobalEnabled"
-          :quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled"
-          :quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold"
-          :quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType"
-          :quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled"
-          :quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold"
-          :quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType"
-          :quotaNotifyTotalEnabled="quotaNotifyState.total.enabled"
-          :quotaNotifyTotalThreshold="quotaNotifyState.total.threshold"
-          :quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType"
-          @update:totalLimit="editQuotaLimit = $event"
-          @update:dailyLimit="editQuotaDailyLimit = $event"
-          @update:weeklyLimit="editQuotaWeeklyLimit = $event"
-          @update:dailyResetMode="editDailyResetMode = $event"
-          @update:dailyResetHour="editDailyResetHour = $event"
-          @update:weeklyResetMode="editWeeklyResetMode = $event"
-          @update:weeklyResetDay="editWeeklyResetDay = $event"
-          @update:weeklyResetHour="editWeeklyResetHour = $event"
-          @update:resetTimezone="editResetTimezone = $event"
-          @update:quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled = $event"
-          @update:quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold = $event"
-          @update:quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType = $event"
-          @update:quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled = $event"
-          @update:quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold = $event"
-          @update:quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType = $event"
-          @update:quotaNotifyTotalEnabled="quotaNotifyState.total.enabled = $event"
-          @update:quotaNotifyTotalThreshold="quotaNotifyState.total.threshold = $event"
-          @update:quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType = $event"
-        />
-      </div>
-      <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
-      <div
-        v-else-if="account?.type === 'apikey' || account?.type === 'bedrock'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
-      >
-        <div class="mb-3">
-          <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.quotaLimitHint') }}
-          </p>
-        </div>
-        <QuotaLimitCard
-          :totalLimit="editQuotaLimit"
-          :dailyLimit="editQuotaDailyLimit"
-          :weeklyLimit="editQuotaWeeklyLimit"
-          :dailyResetMode="editDailyResetMode"
-          :dailyResetHour="editDailyResetHour"
-          :weeklyResetMode="editWeeklyResetMode"
-          :weeklyResetDay="editWeeklyResetDay"
-          :weeklyResetHour="editWeeklyResetHour"
-          :resetTimezone="editResetTimezone"
-          :quotaNotifyGlobalEnabled="quotaNotifyGlobalEnabled"
-          :quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled"
-          :quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold"
-          :quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType"
-          :quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled"
-          :quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold"
-          :quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType"
-          :quotaNotifyTotalEnabled="quotaNotifyState.total.enabled"
-          :quotaNotifyTotalThreshold="quotaNotifyState.total.threshold"
-          :quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType"
-          @update:totalLimit="editQuotaLimit = $event"
-          @update:dailyLimit="editQuotaDailyLimit = $event"
-          @update:weeklyLimit="editQuotaWeeklyLimit = $event"
-          @update:dailyResetMode="editDailyResetMode = $event"
-          @update:dailyResetHour="editDailyResetHour = $event"
-          @update:weeklyResetMode="editWeeklyResetMode = $event"
-          @update:weeklyResetDay="editWeeklyResetDay = $event"
-          @update:weeklyResetHour="editWeeklyResetHour = $event"
-          @update:resetTimezone="editResetTimezone = $event"
-          @update:quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled = $event"
-          @update:quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold = $event"
-          @update:quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType = $event"
-          @update:quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled = $event"
-          @update:quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold = $event"
-          @update:quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType = $event"
-          @update:quotaNotifyTotalEnabled="quotaNotifyState.total.enabled = $event"
-          @update:quotaNotifyTotalThreshold="quotaNotifyState.total.threshold = $event"
-          @update:quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType = $event"
-        />
-      </div>
-
-      <!-- OpenAI API 长上下文计费开关 -->
-      <div
-        v-if="account?.platform === 'openai' && !isSparkShadow && !hideAccountLongContextBilling && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.longContextBilling') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.longContextBillingDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="openai-long-context-billing-toggle"
-            role="switch"
-            :aria-checked="openAILongContextBillingEnabled"
-            @click="openAILongContextBillingEnabled = !openAILongContextBillingEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              openAILongContextBillingEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                openAILongContextBillingEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexCLIOnly') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.codexCLIOnlyDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="codexCLIOnlyEnabled = !codexCLIOnlyEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              codexCLIOnlyEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                codexCLIOnlyEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-        <div
-          v-if="codexCLIOnlyEnabled"
-          class="mt-4 flex items-center justify-between border-l-2 border-gray-200 pl-4 dark:border-dark-600"
-        >
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexCLIOnlyAppServer') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.codexCLIOnlyAppServerDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="codexCLIOnlyAppServerEnabled = !codexCLIOnlyAppServerEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              codexCLIOnlyAppServerEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                codexCLIOnlyAppServerEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <!-- Codex 292 门票状态（仅 OpenAI OAuth） -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token') && codexTurnTickets.length"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket') }}</label>
-        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
-        </p>
-        <div class="mt-3 space-y-1.5">
-          <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="flex items-center justify-between text-sm">
-            <span class="font-medium">{{ ticket.model }}</span>
-            <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
-              {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
-            </span>
-            <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
-              {{ t('admin.accounts.openai.codexTurnTicketPaused') }}
-            </span>
-            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
-            <div v-if="ticket.probe" class="ml-2 text-xs text-gray-500">
-              {{ t('admin.accounts.openai.ticketProbe.' + ticket.probe.result) }} · HTTP {{ ticket.probe.http_status || '—' }}
-              <div>{{ new Date(ticket.probe.checked_at).toLocaleString() }}</div>
-              <div v-if="ticket.probe.next_probe_at">{{ t('admin.accounts.openai.ticketProbeNext') }} {{ new Date(ticket.probe.next_probe_at).toLocaleString() }}</div>
-              <div v-if="ticket.standby_expires_at">{{ t('admin.accounts.openai.ticketStandbyExpires') }} {{ new Date(ticket.standby_expires_at).toLocaleString() }}</div>
+            <div class="space-y-3">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.grokMediaEligibility.title') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.grokMediaEligibility.hint') }}
+                </p>
+              </div>
+              <select
+                v-model="grokMediaEligibilityMode"
+                class="input"
+                data-testid="grok-media-eligibility-mode"
+                :disabled="grokMediaEligibilityLoading"
+              >
+                <option value="auto">{{ t('admin.accounts.grokMediaEligibility.auto') }}</option>
+                <option value="enabled">{{ t('admin.accounts.grokMediaEligibility.enabled') }}</option>
+                <option value="disabled">{{ t('admin.accounts.grokMediaEligibility.disabled') }}</option>
+              </select>
+              <p v-if="grokMediaEligibilityLoading" class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.grokMediaEligibility.loading') }}
+              </p>
+              <p v-else-if="grokMediaEligibilityError" class="text-xs text-red-600 dark:text-red-400">
+            {{ grokMediaEligibilityError }}
+              </p>
+              <div v-else-if="grokMediaEligibilityState" class="rounded-lg bg-gray-50 p-3 text-xs dark:bg-dark-700">
+                <span class="font-medium">{{ t('admin.accounts.grokMediaEligibility.current') }}</span>
+                <span class="ml-1" data-testid="grok-media-eligibility-status">
+              {{ grokMediaEligibilityState.eligible ? t('admin.accounts.grokMediaEligibility.eligible') : t('admin.accounts.grokMediaEligibility.ineligible') }}
+              · {{ t(`admin.accounts.grokMediaEligibility.reasons.${grokMediaEligibilityState.reason}`) }}
+                </span>
+              </div>
+              <div
+                v-if="grokMediaEligibilityMode === 'enabled'"
+                class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20"
+              >
+                <p class="text-xs text-amber-700 dark:text-amber-400">
+                  <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
+              {{ t('admin.accounts.grokMediaEligibility.forceEnableWarning') }}
+                </p>
+              </div>
+              <p v-else-if="grokMediaEligibilityMode === 'auto'" class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.grokMediaEligibility.autoHint') }}
+              </p>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexFingerprintMode') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.codexFingerprintModeDesc') }}
-            </p>
-          </div>
-          <div class="w-52 flex-shrink-0">
-            <Select v-model="codexFingerprintMode" data-testid="edit-codex-fingerprint-mode-select" :options="codexFingerprintModeOptions" />
-          </div>
-        </div>
-      </div>
-
-      <!-- OpenAI 订阅档位手动覆盖（Plus/Pro/Free），仅 OAuth 非影子账号 -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.planType') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.planTypeDesc') }}
-            </p>
-          </div>
-          <div class="w-44 flex-shrink-0">
-            <Select v-model="editPlanType" :options="planTypeOptions" />
-          </div>
-        </div>
-      </div>
-
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.compactMode') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.compactModeDesc') }}
-            </p>
-          </div>
-          <div class="w-44">
-            <Select v-model="openAICompactMode" :options="openAICompactModeOptions" />
-          </div>
-        </div>
-        <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
-          <span class="font-medium">{{ t(openAICompactStatusKey) }}</span>
-          <span
-            v-if="account?.extra?.openai_compact_checked_at"
-            class="ml-2 text-gray-500 dark:text-gray-400"
+          <!-- OpenAI Codex hosted image_generation bridge policy -->
+          <div
+            v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
           >
-            {{ t('admin.accounts.openai.compactLastChecked') }}:
-            {{ formatDateTime(new Date(String(account.extra.openai_compact_checked_at))) }}
-          </span>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.openai.compactModelMapping') }}</label>
-          <p class="input-hint">{{ t('admin.accounts.openai.compactModelMappingDesc') }}</p>
-          <div v-if="openAICompactModelMappings.length > 0" class="mb-3 space-y-2">
-            <div
-              v-for="(mapping, index) in openAICompactModelMappings"
-              :key="getOpenAICompactModelMappingKey(mapping)"
-              class="flex items-center gap-2"
+            <div class="overflow-hidden rounded-lg border border-sky-100 bg-sky-50/60 shadow-sm dark:border-sky-900/50 dark:bg-sky-950/20">
+              <div class="flex items-start gap-3 px-4 py-3">
+                <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-sky-600 shadow-sm ring-1 ring-sky-100 dark:bg-dark-800 dark:text-sky-300 dark:ring-sky-900/60">
+                  <Icon name="sparkles" size="sm" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="input-label mb-0">{{ t('admin.accounts.openai.codexImageTool') }}</label>
+                    <span
+                      class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                      :class="codexImageToolBadgeClass"
+                    >
+                  {{ codexImageToolBadgeLabel }}
+                    </span>
+                  </div>
+                  <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                {{ t('admin.accounts.openai.codexImageToolDesc') }}
+                  </p>
+                </div>
+              </div>
+              <div class="border-t border-sky-100 bg-white/70 p-2 dark:border-sky-900/50 dark:bg-dark-800/70">
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    v-for="option in codexImageToolOptions"
+                    :key="option.value"
+                    type="button"
+                    :data-testid="`codex-image-tool-${option.value}`"
+                    @click="codexImageToolMode = option.value"
+                    :class="[
+                      'group flex min-h-[62px] items-start gap-2 rounded-md border px-3 py-2 text-left transition-all',
+                      codexImageToolMode === option.value
+                        ? option.selectedCardClass
+                        : 'border-transparent bg-transparent text-slate-600 hover:border-gray-200 hover:bg-gray-50 dark:text-slate-300 dark:hover:border-dark-500 dark:hover:bg-dark-700'
+                    ]"
+                  >
+                    <span
+                      :class="[
+                        'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
+                        codexImageToolMode === option.value
+                          ? option.selectedDotClass
+                          : 'border-gray-300 text-transparent group-hover:border-gray-400 dark:border-dark-500'
+                      ]"
+                    >
+                      <Icon name="check" size="xs" :stroke-width="2" />
+                    </span>
+                    <span class="min-w-0">
+                      <span class="block text-sm font-medium">{{ option.label }}</span>
+                      <span class="mt-0.5 block text-xs leading-4 text-slate-500 dark:text-slate-400">{{ option.description }}</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- OpenAI APIKey images: backfill b64_json from url -->
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+            class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+          >
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.openai.imagesUrlToB64Json') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.imagesUrlToB64JsonDesc') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="openai-images-url-to-b64-json-toggle"
+              role="switch"
+              :aria-checked="openAIImagesUrlToB64JsonEnabled"
+              @click="openAIImagesUrlToB64JsonEnabled = !openAIImagesUrlToB64JsonEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                openAIImagesUrlToB64JsonEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
             >
-              <input
-                v-model="mapping.from"
-                type="text"
-                class="input flex-1"
-                :placeholder="t('admin.accounts.fromModel')"
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  openAIImagesUrlToB64JsonEnabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
               />
-              <span class="text-gray-400">→</span>
-              <input
-                v-model="mapping.to"
-                type="text"
-                class="input flex-1"
-                :placeholder="t('admin.accounts.toModel')"
-              />
-              <button type="button" @click="removeOpenAICompactModelMapping(index)" class="text-red-500 hover:text-red-700">
-                <Icon name="trash" size="sm" />
+            </button>
+          </div>
+        </template>
+        <template #automation>
+          <div v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.openai.excelBPS') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSDesc') }}</p>
+              </div>
+            </div>
+            <ExcelBPSModeSwitches :enabled="excelBPSEnabled" :mode="excelBPSMode"
+              :loading="bpsDefaults.loading.value" :failed="bpsDefaults.failed.value" :applied="bpsDefaults.applied.value"
+              :available="!authStore.isObserver" prefix="excel-bps" @toggle="bpsDefaults.toggle" />
+            <div v-if="excelBPSEnabled" class="mt-3 space-y-3">
+              <label class="flex items-center gap-2 text-sm">
+                <input v-model="excelBPSAllModels" type="checkbox" data-testid="excel-bps-all-models" />
+                <span>{{ t('admin.accounts.openai.excelBPSAllModels') }}</span>
+              </label>
+              <div v-if="!excelBPSAllModels" data-testid="excel-bps-model-selection">
+                <label class="input-label">{{ t('admin.accounts.openai.excelBPSModels') }}</label>
+                <ModelWhitelistSelector v-model="excelBPSModels" platform="openai" />
+                <button type="button" class="btn btn-secondary" data-testid="excel-bps-astra-only"
+                  @click="excelBPSModels = ['gpt-6-astra']">{{ t('admin.accounts.openai.excelBPSAstraOnly') }}</button>
+                <p class="input-hint">{{ t('admin.accounts.openai.excelBPSModelsHint') }}</p>
+              </div>
+            </div>
+            <p v-if="excelBPSEnabled" class="mt-2 text-xs text-amber-600 dark:text-amber-400">{{ t('admin.accounts.openai.excelBPSNotice') }}</p>
+            <div v-if="excelBPSEnabled" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSOmitUnsupportedTools" type="checkbox"
+                  data-testid="excel-bps-omit-unsupported-tools"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedTools') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSOmitUnsupportedToolsDesc') }}</p>
+            </div>
+            <div v-if="excelBPSEnabled" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSIgnoreImages" type="checkbox"
+                  data-testid="excel-bps-ignore-images"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreImages') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreImagesDesc') }}</p>
+            </div>
+            <div v-if="excelBPSEnabled" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSIgnoreEncryptedContent" type="checkbox"
+                  data-testid="excel-bps-ignore-encrypted-content"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContent') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSIgnoreEncryptedContentDesc') }}</p>
+            </div>
+            <div v-if="excelBPSEnabled || excelBPS403RecoveryPending" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSAutoDisableOn403" type="checkbox"
+                  data-testid="excel-bps-auto-disable-on-403"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoDisableOn403Desc') }}</p>
+            </div>
+            <div v-if="excelBPSEnabled || excelBPS403RecoveryPending" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSAutoRecoverOn403" type="checkbox" :disabled="!excelBPSAutoDisableOn403"
+                  data-testid="excel-bps-auto-recover-on-403"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500 disabled:opacity-50" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoRecoverOn403Desc') }}</p>
+              <div v-if="excelBPSAutoRecoverOn403 && excelBPSAutoDisableOn403" class="mt-2">
+                <label class="block space-y-1">
+                  <span class="text-sm">{{ t('admin.accounts.openai.excelBPS403RecoveryInterval') }}</span>
+                  <input v-model.number="excelBPSRecoveryIntervalMinutes" type="number" min="1" :max="MAX_BPS_RECOVERY_INTERVAL_MINUTES" step="1" required
+                    data-testid="excel-bps-recovery-interval" class="input w-40" />
+                </label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPS403RecoveryIntervalHint') }}</p>
+              </div>
+            </div>
+            <div v-if="excelBPSEnabled" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSAutoMoveOn403" type="checkbox"
+                  data-testid="excel-bps-auto-move-on-403"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSAutoMoveOn403Desc') }}</p>
+              <div v-if="excelBPSAutoMoveOn403" class="mt-2">
+                <label class="input-label">{{ t('admin.accounts.openai.excelBPS403TargetGroup') }}</label>
+                <Select v-model="excelBPS403TargetGroupID" :options="excelBPS403GroupOptions"
+                  :aria-label="t('admin.accounts.openai.excelBPS403TargetGroup')"
+                  data-testid="excel-bps-403-target-group" />
+              </div>
+            </div>
+            <div v-if="excelBPSEnabled" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSMihomo" type="checkbox" data-testid="excel-bps-mihomo"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSMihomo') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSMihomoDesc') }}</p>
+              <div v-if="excelBPSMihomo" class="mt-2 flex flex-wrap items-center gap-4" role="radiogroup"
+                :aria-label="t('admin.accounts.openai.excelBPSProxySource')">
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSProxySource') }}</span>
+                <label class="flex items-center gap-1.5 text-sm">
+                  <input v-model="excelBPSProxySource" type="radio" value="mihomo" data-testid="excel-bps-proxy-source-mihomo"
+                    class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+              {{ t('admin.accounts.openai.excelBPSProxySourceMihomo') }}
+                </label>
+                <label class="flex items-center gap-1.5 text-sm">
+                  <input v-model="excelBPSProxySource" type="radio" value="ip_pool" data-testid="excel-bps-proxy-source-ip-pool"
+                    class="h-4 w-4 border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+              {{ t('admin.accounts.openai.excelBPSProxySourceIPPool') }}
+                </label>
+              </div>
+              <p v-if="excelBPSMihomo && excelBPSProxySource === 'ip_pool'" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.excelBPSProxySourceIPPoolDesc') }}
+              </p>
+            </div>
+            <div v-if="excelBPSEnabled" class="mt-3">
+              <label class="flex items-center gap-2">
+                <input v-model="excelBPSCacheCreationAsInput" type="checkbox"
+                  data-testid="excel-bps-cache-creation-as-input"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500" />
+                <span class="text-sm">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInput') }}</span>
+              </label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSCacheCreationAsInputDesc') }}</p>
+            </div>
+          </div>
+
+          <AccountAutoBPSSection v-if="autoBPSSupported" v-model:draft="autoBPS.draft.value" :groups="groups"
+            :loading="autoBPS.loading.value" :load-error="autoBPS.loadError.value" :has-rule="!!autoBPS.rule.value"
+            :conflicting-rule-id="autoBPS.conflictingRule.value?.id" />
+
+          <div
+            v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
+            class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+            data-testid="auto-reset-credit-settings"
+          >
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <label class="input-label mb-0">{{ t('admin.accounts.autoResetCredit.title') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.autoResetCredit.hint') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-testid="auto-reset-credit-enabled"
+                @click="autoResetCreditEnabled = !autoResetCreditEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  autoResetCreditEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    autoResetCreditEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold5h') }}</label>
+                <input
+                  v-model.number="autoResetCredit5hThreshold"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  class="input"
+                  :disabled="!autoResetCreditEnabled"
+                  data-testid="auto-reset-credit-5h-threshold"
+                />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold7d') }}</label>
+                <input
+                  v-model.number="autoResetCredit7dThreshold"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  class="input"
+                  :disabled="!autoResetCreditEnabled"
+                  data-testid="auto-reset-credit-7d-threshold"
+                />
+              </div>
+            </div>
+            <p class="input-hint">{{ t('admin.accounts.autoResetCredit.thresholdHint') }}</p>
+          </div>
+        </template>
+        <template #limits>
+          <div v-if="account.type === 'apikey'" class="space-y-4">
+            <!-- Pool Mode Section -->
+            <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.poolModeHint') }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="poolModeEnabled = !poolModeEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    poolModeEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      poolModeEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+              <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                <p class="text-xs text-blue-700 dark:text-blue-400">
+                  <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
+              {{ t('admin.accounts.poolModeInfo') }}
+                </p>
+              </div>
+              <div v-if="poolModeEnabled" class="mt-3">
+                <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
+                <input
+                  v-model.number="poolModeRetryCount"
+                  type="number"
+                  min="0"
+                  :max="MAX_POOL_MODE_RETRY_COUNT"
+                  step="1"
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{
+                t('admin.accounts.poolModeRetryCountHint', {
+                  default: DEFAULT_POOL_MODE_RETRY_COUNT,
+                  max: MAX_POOL_MODE_RETRY_COUNT
+                })
+              }}
+                </p>
+              </div>
+              <div v-if="poolModeEnabled" class="mt-3">
+                <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
+                <input
+                  v-model="poolModeRetryStatusCodesInput"
+                  type="text"
+                  class="input"
+                  :placeholder="DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ')"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.poolModeRetryStatusCodesHint', { default: DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ') }) }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Custom Error Codes Section -->
+            <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.customErrorCodes') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.customErrorCodesHint') }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="customErrorCodesEnabled = !customErrorCodesEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    customErrorCodesEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      customErrorCodesEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+
+              <div v-if="customErrorCodesEnabled" class="space-y-3">
+                <div class="rounded-lg bg-amber-50 p-3 dark:bg-amber-900/20">
+                  <p class="text-xs text-amber-700 dark:text-amber-400">
+                    <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
+                {{ t('admin.accounts.customErrorCodesWarning') }}
+                  </p>
+                </div>
+
+                <!-- Error Code Buttons -->
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="code in commonErrorCodes"
+                    :key="code.value"
+                    type="button"
+                    @click="toggleErrorCode(code.value)"
+                    :class="[
+                      'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                      selectedErrorCodes.includes(code.value)
+                        ? 'bg-red-100 text-red-700 ring-1 ring-red-500 dark:bg-red-900/30 dark:text-red-400'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500'
+                    ]"
+                  >
+                {{ code.value }} {{ code.label }}
+                  </button>
+                </div>
+
+                <!-- Manual input -->
+                <div class="flex items-center gap-2">
+                  <input
+                    v-model.number="customErrorCodeInput"
+                    type="number"
+                    min="100"
+                    max="599"
+                    class="input flex-1"
+                    :placeholder="t('admin.accounts.enterErrorCode')"
+                    @keyup.enter="addCustomErrorCode"
+                  />
+                  <button type="button" @click="addCustomErrorCode" class="btn btn-secondary px-3">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                <!-- Selected codes summary -->
+                <div class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="code in selectedErrorCodes.sort((a, b) => a - b)"
+                    :key="code"
+                    class="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-sm font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                  >
+                {{ code }}
+                    <button
+                      type="button"
+                      @click="removeErrorCode(code)"
+                      class="hover:text-red-900 dark:hover:text-red-300"
+                    >
+                      <Icon name="x" size="sm" :stroke-width="2" />
+                    </button>
+                  </span>
+                  <span v-if="selectedErrorCodes.length === 0" class="text-xs text-gray-400">
+                {{ t('admin.accounts.noneSelectedUsesDefault') }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="account.type === 'bedrock'" class="space-y-4">
+            <!-- Pool Mode Section for Bedrock -->
+            <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.poolMode') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.poolModeHint') }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="poolModeEnabled = !poolModeEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    poolModeEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      poolModeEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+              <div v-if="poolModeEnabled" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                <p class="text-xs text-blue-700 dark:text-blue-400">
+                  <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
+              {{ t('admin.accounts.poolModeInfo') }}
+                </p>
+              </div>
+              <div v-if="poolModeEnabled" class="mt-3">
+                <label class="input-label">{{ t('admin.accounts.poolModeRetryCount') }}</label>
+                <input
+                  v-model.number="poolModeRetryCount"
+                  type="number"
+                  min="0"
+                  :max="MAX_POOL_MODE_RETRY_COUNT"
+                  step="1"
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{
+                t('admin.accounts.poolModeRetryCountHint', {
+                  default: DEFAULT_POOL_MODE_RETRY_COUNT,
+                  max: MAX_POOL_MODE_RETRY_COUNT
+                })
+              }}
+                </p>
+              </div>
+              <div v-if="poolModeEnabled" class="mt-3">
+                <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
+                <input
+                  v-model="poolModeRetryStatusCodesInput"
+                  type="text"
+                  class="input"
+                  :placeholder="DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ')"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.poolModeRetryStatusCodesHint', { default: DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ') }) }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Temp Unschedulable Rules -->
+          <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+            <div class="mb-3 flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.tempUnschedulable.title') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.tempUnschedulable.hint') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="tempUnschedEnabled = !tempUnschedEnabled"
+                :class="[
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  tempUnschedEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    tempUnschedEnabled ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
+              </button>
+            </div>
+
+            <div v-if="tempUnschedEnabled" class="space-y-3">
+              <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
+                <p class="text-xs text-blue-700 dark:text-blue-400">
+                  <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
+              {{ t('admin.accounts.tempUnschedulable.notice') }}
+                </p>
+              </div>
+
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="preset in tempUnschedPresets"
+                  :key="preset.label"
+                  type="button"
+                  @click="addTempUnschedRule(preset.rule)"
+                  class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-dark-600 dark:text-gray-300 dark:hover:bg-dark-500"
+                >
+              + {{ preset.label }}
+                </button>
+              </div>
+
+              <div v-if="tempUnschedRules.length > 0" class="space-y-3 max-h-64 overflow-y-auto overscroll-contain pr-1">
+                <div
+                  v-for="(rule, index) in tempUnschedRules"
+                  :key="getTempUnschedRuleKey(rule)"
+                  class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
+                >
+                  <div class="mb-2 flex items-center justify-between">
+                    <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {{ t('admin.accounts.tempUnschedulable.ruleIndex', { index: index + 1 }) }}
+                    </span>
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        :disabled="index === 0"
+                        @click="moveTempUnschedRule(index, -1)"
+                        class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
+                      >
+                        <Icon name="chevronUp" size="sm" :stroke-width="2" />
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="index === tempUnschedRules.length - 1"
+                        @click="moveTempUnschedRule(index, 1)"
+                        class="rounded p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:text-gray-200"
+                      >
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        @click="removeTempUnschedRule(index)"
+                        class="rounded p-1 text-red-500 transition-colors hover:text-red-600"
+                      >
+                        <Icon name="x" size="sm" :stroke-width="2" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label class="input-label">{{ t('admin.accounts.tempUnschedulable.errorCode') }}</label>
+                      <input
+                        v-model.number="rule.error_code"
+                        type="number"
+                        min="100"
+                        max="599"
+                        class="input"
+                        :placeholder="t('admin.accounts.tempUnschedulable.errorCodePlaceholder')"
+                      />
+                    </div>
+                    <div>
+                      <label class="input-label">{{ t('admin.accounts.tempUnschedulable.durationMinutes') }}</label>
+                      <input
+                        v-model.number="rule.duration_minutes"
+                        type="number"
+                        min="1"
+                        class="input"
+                        :placeholder="t('admin.accounts.tempUnschedulable.durationPlaceholder')"
+                      />
+                    </div>
+                    <div class="sm:col-span-2">
+                      <label class="input-label">{{ t('admin.accounts.tempUnschedulable.keywords') }}</label>
+                      <input
+                        v-model="rule.keywords"
+                        type="text"
+                        class="input"
+                        :placeholder="t('admin.accounts.tempUnschedulable.keywordsPlaceholder')"
+                      />
+                      <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.keywordsHint') }}</p>
+                    </div>
+                    <div class="sm:col-span-2">
+                      <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
+                      <input
+                        v-model="rule.description"
+                        type="text"
+                        class="input"
+                        :placeholder="t('admin.accounts.tempUnschedulable.descriptionPlaceholder')"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                @click="addTempUnschedRule()"
+                class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
+              >
+                <svg
+                  class="mr-1 inline h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+            {{ t('admin.accounts.tempUnschedulable.addRule') }}
               </button>
             </div>
           </div>
-          <button type="button" @click="addOpenAICompactModelMapping" class="btn btn-secondary text-sm">
-            + {{ t('admin.accounts.addMapping') }}
-          </button>
-        </div>
-      </div>
 
-      <div>
-        <div class="flex items-center justify-between">
-          <div>
-            <label class="input-label mb-0">{{
-              t('admin.accounts.autoPauseOnExpired')
-            }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.autoPauseOnExpiredDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            @click="autoPauseOnExpired = !autoPauseOnExpired"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              autoPauseOnExpired ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
+          <div
+            v-if="supportsAccountSchedulingThresholdOverride"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600"
+            data-testid="account-scheduling-threshold-section"
           >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                autoPauseOnExpired ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <div
-        v-if="account?.platform === 'openai'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
-      >
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <label class="input-label mb-0">{{ t('admin.accounts.autoPause5hDisabled') }}</label>
-            <button
-              type="button"
-              @click="autoPause5hDisabled = !autoPause5hDisabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                autoPause5hDisabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-              data-testid="auto-pause-5h-disabled"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  autoPause5hDisabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.autoPause5hThreshold') }}</label>
-          <input
-            v-model.number="autoPause5hThreshold"
-            type="number"
-            min="0"
-            max="100"
-            step="0.1"
-            class="input"
-            :disabled="autoPause5hDisabled"
-            data-testid="auto-pause-5h-threshold"
-          />
-          <p class="input-hint">{{ t('admin.accounts.autoPauseThresholdHint') }}</p>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <label class="input-label mb-0">{{ t('admin.accounts.autoPause7dDisabled') }}</label>
-            <button
-              type="button"
-              @click="autoPause7dDisabled = !autoPause7dDisabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                autoPause7dDisabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-              data-testid="auto-pause-7d-disabled"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  autoPause7dDisabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.autoPause7dThreshold') }}</label>
-          <input
-            v-model.number="autoPause7dThreshold"
-            type="number"
-            min="0"
-            max="100"
-            step="0.1"
-            class="input"
-            :disabled="autoPause7dDisabled"
-            data-testid="auto-pause-7d-threshold"
-          />
-          <p class="input-hint">{{ t('admin.accounts.autoPauseThresholdHint') }}</p>
-        </div>
-      </div>
-
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'oauth' && !isSparkShadow"
-        class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
-        data-testid="auto-reset-credit-settings"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <label class="input-label mb-0">{{ t('admin.accounts.autoResetCredit.title') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.autoResetCredit.hint') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="auto-reset-credit-enabled"
-            @click="autoResetCreditEnabled = !autoResetCreditEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              autoResetCreditEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                autoResetCreditEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold5h') }}</label>
-            <input
-              v-model.number="autoResetCredit5hThreshold"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              class="input"
-              :disabled="!autoResetCreditEnabled"
-              data-testid="auto-reset-credit-5h-threshold"
-            />
-          </div>
-          <div>
-            <label class="input-label">{{ t('admin.accounts.autoResetCredit.threshold7d') }}</label>
-            <input
-              v-model.number="autoResetCredit7dThreshold"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              class="input"
-              :disabled="!autoResetCreditEnabled"
-              data-testid="auto-reset-credit-7d-threshold"
-            />
-          </div>
-        </div>
-        <p class="input-hint">{{ t('admin.accounts.autoResetCredit.thresholdHint') }}</p>
-      </div>
-
-      <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
-      <div
-        v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
-      >
-        <div class="mb-3">
-          <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.quotaControl.hint') }}
-          </p>
-        </div>
-
-        <!-- Window Cost Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.windowCost.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.quotaControl.windowCost.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="windowCostEnabled = !windowCostEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                windowCostEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  windowCostEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-
-          <div v-if="windowCostEnabled" class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.windowCost.limit') }}</label>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
-                <input
-                  v-model.number="windowCostLimit"
-                  type="number"
-                  min="0"
-                  step="1"
-                  class="input pl-7"
-                  :placeholder="t('admin.accounts.quotaControl.windowCost.limitPlaceholder')"
-                />
+            <div class="mb-3 flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.accountSchedulingThresholdOverride') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.accountSchedulingThresholdOverrideHint') }}
+                </p>
               </div>
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.windowCost.limitHint') }}</p>
-            </div>
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.windowCost.stickyReserve') }}</label>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
-                <input
-                  v-model.number="windowCostStickyReserve"
-                  type="number"
-                  min="0"
-                  step="1"
-                  class="input pl-7"
-                  :placeholder="t('admin.accounts.quotaControl.windowCost.stickyReservePlaceholder')"
-                />
-              </div>
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.windowCost.stickyReserveHint') }}</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Session Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.sessionLimit.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.quotaControl.sessionLimit.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="sessionLimitEnabled = !sessionLimitEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                sessionLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  sessionLimitEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-
-          <div v-if="sessionLimitEnabled" class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessions') }}</label>
               <input
-                v-model.number="maxSessions"
+                v-model="accountSchedulingThresholdOverrideEnabled"
+                data-testid="account-scheduling-threshold-override-enabled"
+                type="checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+            </div>
+            <div v-if="accountSchedulingThresholdOverrideEnabled">
+              <label class="input-label">{{ t('admin.accounts.accountSchedulingThresholdOverrideValue') }}</label>
+              <input
+                v-model.number="accountSchedulingThresholdOverrideValue"
+                data-testid="account-scheduling-threshold-override-value"
                 type="number"
                 min="1"
-                step="1"
+                max="100"
                 class="input"
-                :placeholder="t('admin.accounts.quotaControl.sessionLimit.maxSessionsPlaceholder')"
               />
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessionsHint') }}</p>
-            </div>
-            <div>
-              <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.idleTimeout') }}</label>
-              <div class="relative">
-                <input
-                  v-model.number="sessionIdleTimeout"
-                  type="number"
-                  min="1"
-                  step="1"
-                  class="input pr-12"
-                  :placeholder="t('admin.accounts.quotaControl.sessionLimit.idleTimeoutPlaceholder')"
-                />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">{{ t('common.minutes') }}</span>
-              </div>
-              <p class="input-hint">{{ t('admin.accounts.quotaControl.sessionLimit.idleTimeoutHint') }}</p>
+              <p class="input-hint">{{ t('admin.accounts.accountSchedulingThresholdOverrideDisabledHint') }}</p>
             </div>
           </div>
-        </div>
 
-        <!-- RPM Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <AccountRpmSettings
-            v-model:enabled="rpmLimitEnabled"
-            v-model:base-rpm="baseRpm"
-            v-model:strategy="rpmStrategy"
-            v-model:sticky-buffer="rpmStickyBuffer"
+          <OllamaCloudUsageSettings
+            v-if="account?.ollama_cloud_usage?.eligible"
+            :account="account"
+            @updated="handleOllamaCloudUsageUpdated"
           />
 
-          <!-- 用户消息限速模式（独立于 RPM 开关，始终可见） -->
-          <div class="mt-4">
-            <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueue') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 mb-2">
-              {{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueueHint') }}
-            </p>
-            <div class="flex space-x-2">
-              <button type="button" v-for="opt in umqModeOptions" :key="opt.value"
-                @click="userMsgQueueMode = opt.value"
+          <section
+            v-if="account?.opencode_go_usage?.eligible"
+            class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+            data-testid="opencode-go-usage-settings"
+          >
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.accounts.opencodeGo.title') }}
+                </h3>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.opencodeGo.panelHint') }}
+                </p>
+              </div>
+              <span
+                class="whitespace-nowrap rounded px-2 py-1 text-xs font-medium"
+                :class="opencodeGoStatusOk
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'"
+              >
+            {{ opencodeGoStatusLabel }}
+              </span>
+            </div>
+
+            <div v-if="opencodeGoLoading" class="flex h-20 items-center justify-center text-gray-400">
+              <Icon name="refresh" size="sm" class="animate-spin" />
+            </div>
+            <template v-else>
+              <div
+                v-if="opencodeGoSnapshot"
+                class="border-y border-gray-100 py-3 dark:border-dark-700"
+                data-testid="opencode-go-usage-details"
+              >
+                <div class="grid grid-cols-[minmax(4rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.rolling') }}</span>
+                  <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoWindowSummary(opencodeGoSnapshot.data?.rolling) }}</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.weekly') }}</span>
+                  <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoWindowSummary(opencodeGoSnapshot.data?.weekly) }}</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.monthly') }}</span>
+                  <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoWindowSummary(opencodeGoSnapshot.data?.monthly) }}</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.status') }}</span>
+                  <span class="break-words font-medium text-gray-900 dark:text-white">{{ opencodeGoStatusLabel }}</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('admin.accounts.opencodeGo.updatedAt') }}</span>
+                  <span class="break-words text-gray-900 dark:text-white">{{ opencodeGoFormatDate(opencodeGoSnapshot.fetched_at || opencodeGoSnapshot.last_attempt_at) }}</span>
+                </div>
+                <p
+                  v-if="opencodeGoSnapshot.last_error"
+                  class="mt-2 break-words border-t border-gray-100 pt-2 text-xs text-amber-700 dark:border-dark-700 dark:text-amber-300"
+                >
+              {{ t(`admin.accounts.opencodeGo.errors.${opencodeGoSnapshot.last_error}`, opencodeGoSnapshot.last_error) }}
+                </p>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  :disabled="opencodeGoRefreshing"
+                  data-testid="opencode-go-refresh"
+                  @click="refreshOpenCodeGoUsage"
+                >
+                  <Icon name="refresh" size="xs" class="mr-1.5" :class="{ 'animate-spin': opencodeGoRefreshing }" />
+              {{ t('admin.accounts.opencodeGo.refreshNow') }}
+                </button>
+              </div>
+
+              <div class="flex items-center justify-between gap-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+                <div>
+                  <label class="text-sm font-medium text-gray-900 dark:text-white">
+                {{ t('admin.accounts.opencodeGo.autoRefresh') }}
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.opencodeGo.autoRefreshHint') }}
+                  </p>
+                </div>
+                <Toggle
+                  :model-value="opencodeGoState?.auto_refresh_enabled ?? false"
+                  :disabled="opencodeGoSaving"
+                  data-testid="opencode-go-auto-refresh"
+                  @update:model-value="setOpenCodeGoAutoRefresh"
+                />
+              </div>
+            </template>
+          </section>
+
+          <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
+          <div
+            v-if="account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
+          >
+            <div class="mb-3">
+              <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.quotaControl.hint') }}
+              </p>
+            </div>
+            <QuotaLimitCard
+              :totalLimit="editQuotaLimit"
+              :dailyLimit="editQuotaDailyLimit"
+              :weeklyLimit="editQuotaWeeklyLimit"
+              :dailyResetMode="editDailyResetMode"
+              :dailyResetHour="editDailyResetHour"
+              :weeklyResetMode="editWeeklyResetMode"
+              :weeklyResetDay="editWeeklyResetDay"
+              :weeklyResetHour="editWeeklyResetHour"
+              :resetTimezone="editResetTimezone"
+              :quotaNotifyGlobalEnabled="quotaNotifyGlobalEnabled"
+              :quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled"
+              :quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold"
+              :quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType"
+              :quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled"
+              :quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold"
+              :quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType"
+              :quotaNotifyTotalEnabled="quotaNotifyState.total.enabled"
+              :quotaNotifyTotalThreshold="quotaNotifyState.total.threshold"
+              :quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType"
+              @update:totalLimit="editQuotaLimit = $event"
+              @update:dailyLimit="editQuotaDailyLimit = $event"
+              @update:weeklyLimit="editQuotaWeeklyLimit = $event"
+              @update:dailyResetMode="editDailyResetMode = $event"
+              @update:dailyResetHour="editDailyResetHour = $event"
+              @update:weeklyResetMode="editWeeklyResetMode = $event"
+              @update:weeklyResetDay="editWeeklyResetDay = $event"
+              @update:weeklyResetHour="editWeeklyResetHour = $event"
+              @update:resetTimezone="editResetTimezone = $event"
+              @update:quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled = $event"
+              @update:quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold = $event"
+              @update:quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType = $event"
+              @update:quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled = $event"
+              @update:quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold = $event"
+              @update:quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType = $event"
+              @update:quotaNotifyTotalEnabled="quotaNotifyState.total.enabled = $event"
+              @update:quotaNotifyTotalThreshold="quotaNotifyState.total.threshold = $event"
+              @update:quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType = $event"
+            />
+          </div>
+
+          <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
+          <div
+            v-else-if="account?.type === 'apikey' || account?.type === 'bedrock'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
+          >
+            <div class="mb-3">
+              <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.quotaLimitHint') }}
+              </p>
+            </div>
+            <QuotaLimitCard
+              :totalLimit="editQuotaLimit"
+              :dailyLimit="editQuotaDailyLimit"
+              :weeklyLimit="editQuotaWeeklyLimit"
+              :dailyResetMode="editDailyResetMode"
+              :dailyResetHour="editDailyResetHour"
+              :weeklyResetMode="editWeeklyResetMode"
+              :weeklyResetDay="editWeeklyResetDay"
+              :weeklyResetHour="editWeeklyResetHour"
+              :resetTimezone="editResetTimezone"
+              :quotaNotifyGlobalEnabled="quotaNotifyGlobalEnabled"
+              :quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled"
+              :quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold"
+              :quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType"
+              :quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled"
+              :quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold"
+              :quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType"
+              :quotaNotifyTotalEnabled="quotaNotifyState.total.enabled"
+              :quotaNotifyTotalThreshold="quotaNotifyState.total.threshold"
+              :quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType"
+              @update:totalLimit="editQuotaLimit = $event"
+              @update:dailyLimit="editQuotaDailyLimit = $event"
+              @update:weeklyLimit="editQuotaWeeklyLimit = $event"
+              @update:dailyResetMode="editDailyResetMode = $event"
+              @update:dailyResetHour="editDailyResetHour = $event"
+              @update:weeklyResetMode="editWeeklyResetMode = $event"
+              @update:weeklyResetDay="editWeeklyResetDay = $event"
+              @update:weeklyResetHour="editWeeklyResetHour = $event"
+              @update:resetTimezone="editResetTimezone = $event"
+              @update:quotaNotifyDailyEnabled="quotaNotifyState.daily.enabled = $event"
+              @update:quotaNotifyDailyThreshold="quotaNotifyState.daily.threshold = $event"
+              @update:quotaNotifyDailyThresholdType="quotaNotifyState.daily.thresholdType = $event"
+              @update:quotaNotifyWeeklyEnabled="quotaNotifyState.weekly.enabled = $event"
+              @update:quotaNotifyWeeklyThreshold="quotaNotifyState.weekly.threshold = $event"
+              @update:quotaNotifyWeeklyThresholdType="quotaNotifyState.weekly.thresholdType = $event"
+              @update:quotaNotifyTotalEnabled="quotaNotifyState.total.enabled = $event"
+              @update:quotaNotifyTotalThreshold="quotaNotifyState.total.threshold = $event"
+              @update:quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType = $event"
+            />
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="input-label mb-0">{{
+              t('admin.accounts.autoPauseOnExpired')
+            }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.autoPauseOnExpiredDesc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                @click="autoPauseOnExpired = !autoPauseOnExpired"
                 :class="[
-                  'px-3 py-1.5 text-sm rounded-md border transition-colors',
-                  userMsgQueueMode === opt.value
-                    ? 'bg-primary-600 text-white border-primary-600'
-                    : 'bg-white dark:bg-dark-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-500 hover:bg-gray-50 dark:hover:bg-dark-600'
-                ]">
-                {{ opt.label }}
+                  'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                  autoPauseOnExpired ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                ]"
+              >
+                <span
+                  :class="[
+                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                    autoPauseOnExpired ? 'translate-x-5' : 'translate-x-0'
+                  ]"
+                />
               </button>
             </div>
           </div>
-        </div>
 
-        <!-- TLS Fingerprint -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="flex items-center justify-between">
+          <div
+            v-if="account?.platform === 'openai'"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
+          >
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="input-label mb-0">{{ t('admin.accounts.autoPause5hDisabled') }}</label>
+                <button
+                  type="button"
+                  @click="autoPause5hDisabled = !autoPause5hDisabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    autoPause5hDisabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                  data-testid="auto-pause-5h-disabled"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      autoPause5hDisabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+              <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
+            </div>
             <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.tlsFingerprint.label') }}</label>
+              <label class="input-label">{{ t('admin.accounts.autoPause5hThreshold') }}</label>
+              <input
+                v-model.number="autoPause5hThreshold"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                class="input"
+                :disabled="autoPause5hDisabled"
+                data-testid="auto-pause-5h-threshold"
+              />
+              <p class="input-hint">{{ t('admin.accounts.autoPauseThresholdHint') }}</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="input-label mb-0">{{ t('admin.accounts.autoPause7dDisabled') }}</label>
+                <button
+                  type="button"
+                  @click="autoPause7dDisabled = !autoPause7dDisabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    autoPause7dDisabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                  data-testid="auto-pause-7d-disabled"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      autoPause7dDisabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+              <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.autoPause7dThreshold') }}</label>
+              <input
+                v-model.number="autoPause7dThreshold"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                class="input"
+                :disabled="autoPause7dDisabled"
+                data-testid="auto-pause-7d-threshold"
+              />
+              <p class="input-hint">{{ t('admin.accounts.autoPauseThresholdHint') }}</p>
+            </div>
+          </div>
+
+          <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
+          <div
+            v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+            class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
+          >
+            <div class="mb-3">
+              <h3 class="input-label mb-0 text-base font-semibold">{{ t('admin.accounts.quotaControl.title') }}</h3>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.quotaControl.hint') }}
+              </p>
+            </div>
+
+            <!-- Window Cost Limit -->
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.windowCost.label') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.quotaControl.windowCost.hint') }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="windowCostEnabled = !windowCostEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    windowCostEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      windowCostEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+
+              <div v-if="windowCostEnabled" class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.quotaControl.windowCost.limit') }}</label>
+                  <div class="relative">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
+                    <input
+                      v-model.number="windowCostLimit"
+                      type="number"
+                      min="0"
+                      step="1"
+                      class="input pl-7"
+                      :placeholder="t('admin.accounts.quotaControl.windowCost.limitPlaceholder')"
+                    />
+                  </div>
+                  <p class="input-hint">{{ t('admin.accounts.quotaControl.windowCost.limitHint') }}</p>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.quotaControl.windowCost.stickyReserve') }}</label>
+                  <div class="relative">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">$</span>
+                    <input
+                      v-model.number="windowCostStickyReserve"
+                      type="number"
+                      min="0"
+                      step="1"
+                      class="input pl-7"
+                      :placeholder="t('admin.accounts.quotaControl.windowCost.stickyReservePlaceholder')"
+                    />
+                  </div>
+                  <p class="input-hint">{{ t('admin.accounts.quotaControl.windowCost.stickyReserveHint') }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Session Limit -->
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.sessionLimit.label') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.quotaControl.sessionLimit.hint') }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="sessionLimitEnabled = !sessionLimitEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    sessionLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      sessionLimitEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+
+              <div v-if="sessionLimitEnabled" class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessions') }}</label>
+                  <input
+                    v-model.number="maxSessions"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="input"
+                    :placeholder="t('admin.accounts.quotaControl.sessionLimit.maxSessionsPlaceholder')"
+                  />
+                  <p class="input-hint">{{ t('admin.accounts.quotaControl.sessionLimit.maxSessionsHint') }}</p>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.accounts.quotaControl.sessionLimit.idleTimeout') }}</label>
+                  <div class="relative">
+                    <input
+                      v-model.number="sessionIdleTimeout"
+                      type="number"
+                      min="1"
+                      step="1"
+                      class="input pr-12"
+                      :placeholder="t('admin.accounts.quotaControl.sessionLimit.idleTimeoutPlaceholder')"
+                    />
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">{{ t('common.minutes') }}</span>
+                  </div>
+                  <p class="input-hint">{{ t('admin.accounts.quotaControl.sessionLimit.idleTimeoutHint') }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- RPM Limit -->
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+              <AccountRpmSettings
+                v-model:enabled="rpmLimitEnabled"
+                v-model:base-rpm="baseRpm"
+                v-model:strategy="rpmStrategy"
+                v-model:sticky-buffer="rpmStickyBuffer"
+              />
+
+              <!-- 用户消息限速模式（独立于 RPM 开关，始终可见） -->
+              <div class="mt-4">
+                <label class="input-label">{{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueue') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 mb-2">
+              {{ t('admin.accounts.quotaControl.rpmLimit.userMsgQueueHint') }}
+                </p>
+                <div class="flex space-x-2">
+                  <button type="button" v-for="opt in umqModeOptions" :key="opt.value"
+                    @click="userMsgQueueMode = opt.value"
+                    :class="[
+                      'px-3 py-1.5 text-sm rounded-md border transition-colors',
+                      userMsgQueueMode === opt.value
+                        ? 'bg-primary-600 text-white border-primary-600'
+                        : 'bg-white dark:bg-dark-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-500 hover:bg-gray-50 dark:hover:bg-dark-600'
+                    ]">
+                {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- TLS Fingerprint -->
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.tlsFingerprint.label') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.quotaControl.tlsFingerprint.hint') }}
-              </p>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="tlsFingerprintEnabled = !tlsFingerprintEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    tlsFingerprintEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      tlsFingerprintEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+              <!-- Profile selector -->
+              <div v-if="tlsFingerprintEnabled" class="mt-3">
+                <select v-model="tlsFingerprintProfileId" class="input">
+                  <option :value="null">{{ t('admin.accounts.quotaControl.tlsFingerprint.defaultProfile') }}</option>
+                  <option v-if="tlsFingerprintProfiles.length > 0" :value="-1">{{ t('admin.accounts.quotaControl.tlsFingerprint.randomProfile') }}</option>
+                  <option v-for="p in tlsFingerprintProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+              </div>
             </div>
-            <button
-              type="button"
-              @click="tlsFingerprintEnabled = !tlsFingerprintEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                tlsFingerprintEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  tlsFingerprintEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <!-- Profile selector -->
-          <div v-if="tlsFingerprintEnabled" class="mt-3">
-            <select v-model="tlsFingerprintProfileId" class="input">
-              <option :value="null">{{ t('admin.accounts.quotaControl.tlsFingerprint.defaultProfile') }}</option>
-              <option v-if="tlsFingerprintProfiles.length > 0" :value="-1">{{ t('admin.accounts.quotaControl.tlsFingerprint.randomProfile') }}</option>
-              <option v-for="p in tlsFingerprintProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
-            </select>
-          </div>
-        </div>
 
-        <!-- Session ID Masking -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.sessionIdMasking.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <!-- Session ID Masking -->
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.sessionIdMasking.label') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.quotaControl.sessionIdMasking.hint') }}
-              </p>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="sessionIdMaskingEnabled = !sessionIdMaskingEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    sessionIdMaskingEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      sessionIdMaskingEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              @click="sessionIdMaskingEnabled = !sessionIdMaskingEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                sessionIdMaskingEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  sessionIdMaskingEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-        </div>
 
-        <!-- Cache TTL Override -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.cacheTTLOverride.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <!-- Cache TTL Override -->
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.cacheTTLOverride.label') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.quotaControl.cacheTTLOverride.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="cacheTTLOverrideEnabled = !cacheTTLOverrideEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                cacheTTLOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  cacheTTLOverrideEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <div v-if="cacheTTLOverrideEnabled" class="mt-3">
-            <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.cacheTTLOverride.target') }}</label>
-            <select
-              v-model="cacheTTLOverrideTarget"
-              class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
-            >
-              <option value="5m">5m</option>
-              <option value="1h">1h</option>
-            </select>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="cacheTTLOverrideEnabled = !cacheTTLOverrideEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    cacheTTLOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      cacheTTLOverrideEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+              <div v-if="cacheTTLOverrideEnabled" class="mt-3">
+                <label class="input-label text-xs">{{ t('admin.accounts.quotaControl.cacheTTLOverride.target') }}</label>
+                <select
+                  v-model="cacheTTLOverrideTarget"
+                  class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-dark-500 dark:bg-dark-700 dark:text-white"
+                >
+                  <option value="5m">5m</option>
+                  <option value="1h">1h</option>
+                </select>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.quotaControl.cacheTTLOverride.targetHint') }}
-            </p>
-          </div>
-        </div>
+                </p>
+              </div>
+            </div>
 
-        <!-- Custom Base URL Relay -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
-          <div class="flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.customBaseUrl.label') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <!-- Custom Base URL Relay -->
+            <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.customBaseUrl.label') }}</label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.quotaControl.customBaseUrl.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="customBaseUrlEnabled = !customBaseUrlEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                customBaseUrlEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  customBaseUrlEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <div v-if="customBaseUrlEnabled" class="mt-3">
-            <input
-              v-model="customBaseUrl"
-              type="text"
-              class="input"
-              :placeholder="t('admin.accounts.quotaControl.customBaseUrl.urlHint')"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <div>
-          <label class="input-label">{{ t('common.status') }}</label>
-          <Select v-model="form.status" :options="statusOptions" />
-        </div>
-
-        <!-- Mixed Scheduling (only for antigravity accounts, read-only in edit mode) -->
-        <div v-if="account?.platform === 'antigravity'" class="flex items-center gap-2">
-          <label class="flex cursor-not-allowed items-center gap-2 opacity-60">
-            <input
-              type="checkbox"
-              v-model="mixedScheduling"
-              disabled
-              class="h-4 w-4 cursor-not-allowed rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
-            />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t('admin.accounts.mixedScheduling') }}
-            </span>
-          </label>
-          <div class="group relative">
-            <span
-              class="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-xs text-gray-500 hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500"
-            >
-              ?
-            </span>
-            <!-- Tooltip（向下显示避免被弹窗裁剪） -->
-            <div
-              class="pointer-events-none absolute left-0 top-full z-[100] mt-1.5 w-72 rounded bg-gray-900 px-3 py-2 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
-            >
-              {{ t('admin.accounts.mixedSchedulingTooltip') }}
-              <div
-                class="absolute bottom-full left-3 border-4 border-transparent border-b-gray-900 dark:border-b-gray-700"
-              ></div>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  @click="customBaseUrlEnabled = !customBaseUrlEnabled"
+                  :class="[
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                    customBaseUrlEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                      customBaseUrlEnabled ? 'translate-x-5' : 'translate-x-0'
+                    ]"
+                  />
+                </button>
+              </div>
+              <div v-if="customBaseUrlEnabled" class="mt-3">
+                <input
+                  v-model="customBaseUrl"
+                  type="text"
+                  class="input"
+                  :placeholder="t('admin.accounts.quotaControl.customBaseUrl.urlHint')"
+                />
+              </div>
             </div>
           </div>
-        </div>
-        <div v-if="account?.platform === 'antigravity'" class="mt-3 flex items-center gap-2">
-          <label class="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              v-model="allowOverages"
-              class="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
-            />
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {{ t('admin.accounts.allowOverages') }}
-            </span>
-          </label>
-          <div class="group relative">
-            <span
-              class="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-xs text-gray-500 hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500"
-            >
-              ?
-            </span>
-            <div
-              class="pointer-events-none absolute left-0 top-full z-[100] mt-1.5 w-72 rounded bg-gray-900 px-3 py-2 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
-            >
-              {{ t('admin.accounts.allowOveragesTooltip') }}
-              <div
-                class="absolute bottom-full left-3 border-4 border-transparent border-b-gray-900 dark:border-b-gray-700"
-              ></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Group Selection - 仅标准模式显示 -->
-      <GroupSelector
-        v-model="form.group_ids"
-        :groups="selectableGroups"
-        :platform="account?.platform"
-        :mixed-scheduling="mixedScheduling"
-        data-tour="account-form-groups"
-      />
-
-      <AccountGroupModelLimits
-        v-model="groupAllowedModels"
-        :groups="groupsForModelLimits"
-        :platform="account?.platform"
-        :account-id="account?.id"
-      />
-
+        </template>
+      </SettingsLayout>
     </form>
 
     <template #footer>
@@ -3269,6 +3296,7 @@
 </template>
 
 <script setup lang="ts">
+import SettingsLayout from '@/components/common/SettingsLayout.vue'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier, readAccountCostMultiplier } from '@/utils/accountCost'
 
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
@@ -6059,7 +6087,8 @@ const handleSubmit = async () => {
       if (preserveDisabledBPS) {
         for (const key of ['openai_excel_bps_config_mode', 'openai_excel_bps_models', 'openai_excel_bps_mihomo', 'openai_excel_bps_proxy_source',
           'openai_excel_bps_cache_creation_as_input', 'openai_excel_bps_omit_unsupported_tools',
-          'openai_excel_bps_ignore_images', 'openai_excel_bps_ignore_encrypted_content']) {
+          'openai_excel_bps_ignore_images',
+          'openai_excel_bps_ignore_encrypted_content']) {
           if (Object.prototype.hasOwnProperty.call(currentExtra, key)) newExtra[key] = currentExtra[key]
           else delete newExtra[key]
         }
@@ -6337,4 +6366,15 @@ const handleMixedChannelConfirm = async () => {
 const handleMixedChannelCancel = () => {
   clearMixedChannelDialog()
 }
+
+const editSettingsSections = computed(() => [
+  { id: 'general', visible: true },
+  { id: 'connection', visible: !isSparkShadow.value },
+  { id: 'models', visible: true },
+  { id: 'scheduling', visible: true },
+  { id: 'protocol', visible: ['openai', 'anthropic', 'antigravity', 'grok'].includes(props.account?.platform ?? '') },
+  { id: 'media', visible: props.account?.platform === 'openai' || isGrokOAuthAccount.value },
+  { id: 'automation', visible: props.account?.platform === 'openai' && props.account?.type === 'oauth' && !isSparkShadow.value },
+  { id: 'limits', visible: true }
+].filter(section => section.visible))
 </script>

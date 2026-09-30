@@ -506,7 +506,7 @@ describe('BulkEditAccountModal', () => {
     const selector = wrapper.findComponent(ModelWhitelistSelector)
     expect(selector.exists()).toBe(true)
 
-    await selector.find('div.cursor-pointer').trigger('click')
+    await selector.find('[data-testid="model-selector-toggle"]').trigger('click')
 
     expect(wrapper.text()).toContain('gemini-3.1-flash-image')
     expect(wrapper.text()).toContain('gemini-2.5-flash-image')

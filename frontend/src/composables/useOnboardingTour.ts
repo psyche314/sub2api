@@ -83,6 +83,10 @@ export function useOnboardingTour(options: OnboardingOptions) {
     const startTime = Date.now()
     while (Date.now() - startTime < timeout) {
       const element = document.querySelector(selector)
+      if (element && element.getBoundingClientRect().height === 0) {
+        element.dispatchEvent(new Event('settings-reveal', { bubbles: true }))
+        await nextTick()
+      }
       if (element && element.getBoundingClientRect().height > 0) {
         return true
       }
@@ -275,13 +279,14 @@ export function useOnboardingTour(options: OnboardingOptions) {
         cleanupClickListener()
 
         // 尝试等待元素
-        if (!element && step.element && typeof step.element === 'string') {
+        if ((!element || element.getBoundingClientRect().height === 0) && step.element && typeof step.element === 'string') {
            const exists = await ensureElement(step.element, 8000)
            if (!exists) {
              console.warn(`Tour element not found after 8s: ${step.element}`)
              return
            }
            element = document.querySelector(step.element) as HTMLElement
+           driverInstance?.refresh()
         }
 
         if (isInteractiveStep(step) && element) {

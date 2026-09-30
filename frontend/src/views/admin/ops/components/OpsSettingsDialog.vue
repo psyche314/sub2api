@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsLayout from '@/components/common/SettingsLayout.vue'
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -232,211 +233,215 @@ async function saveAllSettings() {
 </script>
 
 <template>
-  <BaseDialog :show="show" :title="t('admin.ops.settings.title')" width="extra-wide" @close="emit('close')">
+  <BaseDialog :show="show" :title="t('admin.ops.settings.title')" width="extra-wide" content-class="settings-dialog" @close="emit('close')">
     <div v-if="loading" class="py-10 text-center text-sm text-gray-500">
       {{ t('common.loading') }}
     </div>
 
-    <div v-else-if="runtimeSettings && emailConfig && advancedSettings" class="space-y-6">
-      <!-- 验证错误 -->
-      <div v-if="!validation.valid" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
+    <div v-else-if="runtimeSettings && emailConfig && advancedSettings" class="settings-form">
+      <div v-if="!validation.valid" class="m-4 max-h-24 shrink-0 overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200">
         <div class="font-bold">{{ t('admin.ops.settings.validation.title') }}</div>
         <ul class="mt-1 list-disc space-y-1 pl-4">
           <li v-for="msg in validation.errors" :key="msg">{{ msg }}</li>
         </ul>
       </div>
-
-      <!-- 数据采集频率 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
-        <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.dataCollection') }}</h4>
-        <div>
-          <label class="input-label">{{ t('admin.ops.settings.evaluationInterval') }}</label>
-          <input
-            v-model.number="runtimeSettings.evaluation_interval_seconds"
-            type="number"
-            min="1"
-            max="86400"
-            class="input"
-          />
-          <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.evaluationIntervalHint') }}</p>
-        </div>
-      </div>
-
-      <!-- 预警配置 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
-        <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.alertConfig') }}</h4>
-
-        <div class="space-y-4">
-          <div class="flex items-center justify-between">
+      <SettingsLayout :sections="[{ id: 'monitoring' }, { id: 'alerts' }, { id: 'reports' }, { id: 'retention' }, { id: 'limits' }, { id: 'display' }]" :reset-key="show">
+        <template #monitoring>
+          <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+            <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.dataCollection') }}</h4>
             <div>
-              <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableAlert') }}</label>
-            </div>
-            <Toggle v-model="emailConfig.alert.enabled" />
-          </div>
-
-          <div v-if="emailConfig.alert.enabled">
-            <label class="input-label">{{ t('admin.ops.settings.alertRecipients') }}</label>
-            <div class="flex gap-2">
+              <label class="input-label">{{ t('admin.ops.settings.evaluationInterval') }}</label>
               <input
-                v-model="alertRecipientInput"
-                type="email"
+                v-model.number="runtimeSettings.evaluation_interval_seconds"
+                type="number"
+                min="1"
+                max="86400"
                 class="input"
-                :placeholder="t('admin.ops.settings.emailPlaceholder')"
-                @keydown.enter.prevent="addRecipient('alert')"
               />
-              <button class="btn btn-secondary whitespace-nowrap" type="button" @click="addRecipient('alert')">
-                {{ t('common.add') }}
-              </button>
+              <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.evaluationIntervalHint') }}</p>
             </div>
-            <div class="mt-2 flex flex-wrap gap-2">
-              <span
-                v-for="email in emailConfig.alert.recipients"
-                :key="email"
-                class="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-              >
-                {{ email }}
-                <button type="button" class="text-blue-700/80 hover:text-blue-900" @click="removeRecipient('alert', email)">×</button>
-              </span>
-            </div>
-            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.ops.settings.recipientsHint') }}
-            </p>
           </div>
 
-          <div v-if="emailConfig.alert.enabled">
-            <label class="input-label">{{ t('admin.ops.settings.minSeverity') }}</label>
-            <Select v-model="emailConfig.alert.min_severity" :options="severityOptions" />
-          </div>
-        </div>
-      </div>
+          <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+            <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.metricThresholds') }}</h4>
+            <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.settings.metricThresholdsHint') }}</p>
 
-      <!-- 评估报告配置 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
-        <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.reportConfig') }}</h4>
+            <div class="space-y-4">
+              <div>
+                <label class="input-label">{{ t('admin.ops.settings.slaMinPercent') }}</label>
+                <input
+                  v-model.number="metricThresholds.sla_percent_min"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.slaMinPercentHint') }}</p>
+              </div>
 
-        <div class="space-y-4">
-          <div class="flex items-center justify-between">
-            <div>
-              <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableReport') }}</label>
+
+              <div>
+                <label class="input-label">{{ t('admin.ops.settings.ttftP99MaxMs') }}</label>
+                <input
+                  v-model.number="metricThresholds.ttft_p99_ms_max"
+                  type="number"
+                  min="0"
+                  step="50"
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.ttftP99MaxMsHint') }}</p>
+              </div>
+
+              <div>
+                <label class="input-label">{{ t('admin.ops.settings.requestErrorRateMaxPercent') }}</label>
+                <input
+                  v-model.number="metricThresholds.request_error_rate_percent_max"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.requestErrorRateMaxPercentHint') }}</p>
+              </div>
+
+              <div>
+                <label class="input-label">{{ t('admin.ops.settings.upstreamErrorRateMaxPercent') }}</label>
+                <input
+                  v-model.number="metricThresholds.upstream_error_rate_percent_max"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.upstreamErrorRateMaxPercentHint') }}</p>
+              </div>
             </div>
-            <Toggle v-model="emailConfig.report.enabled" />
           </div>
 
-          <div v-if="emailConfig.report.enabled">
-            <label class="input-label">{{ t('admin.ops.settings.reportRecipients') }}</label>
-            <div class="flex gap-2">
-              <input
-                v-model="reportRecipientInput"
-                type="email"
-                class="input"
-                :placeholder="t('admin.ops.settings.emailPlaceholder')"
-                @keydown.enter.prevent="addRecipient('report')"
-              />
-              <button class="btn btn-secondary whitespace-nowrap" type="button" @click="addRecipient('report')">
-                {{ t('common.add') }}
-              </button>
-            </div>
-            <div class="mt-2 flex flex-wrap gap-2">
-              <span
-                v-for="email in emailConfig.report.recipients"
-                :key="email"
-                class="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-              >
-                {{ email }}
-                <button type="button" class="text-blue-700/80 hover:text-blue-900" @click="removeRecipient('report', email)">×</button>
-              </span>
-            </div>
-            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.ops.settings.recipientsHint') }}
-            </p>
-          </div>
+          <div class="space-y-3">
+            <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.aggregation') }}</h5>
 
-          <div v-if="emailConfig.report.enabled" class="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div class="flex items-center justify-between">
-              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dailySummary') }}</label>
-              <Toggle v-model="emailConfig.report.daily_summary_enabled" />
-            </div>
-            <div v-if="emailConfig.report.daily_summary_enabled">
-              <input v-model="emailConfig.report.daily_summary_schedule" type="text" class="input" placeholder="0 9 * * *" />
-            </div>
-            <div class="flex items-center justify-between">
-              <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.weeklySummary') }}</label>
-              <Toggle v-model="emailConfig.report.weekly_summary_enabled" />
-            </div>
-            <div v-if="emailConfig.report.weekly_summary_enabled">
-              <input v-model="emailConfig.report.weekly_summary_schedule" type="text" class="input" placeholder="0 9 * * 1" />
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.enableAggregation') }}</label>
+                <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.aggregationHint') }}</p>
+              </div>
+              <Toggle v-model="advancedSettings.aggregation.aggregation_enabled" />
             </div>
           </div>
-        </div>
-      </div>
+        </template>
+        <template #alerts>
+          <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+            <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.alertConfig') }}</h4>
 
-      <!-- 指标阈值配置 -->
-      <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
-        <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.metricThresholds') }}</h4>
-        <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.settings.metricThresholdsHint') }}</p>
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableAlert') }}</label>
+                </div>
+                <Toggle v-model="emailConfig.alert.enabled" />
+              </div>
 
-        <div class="space-y-4">
-          <div>
-            <label class="input-label">{{ t('admin.ops.settings.slaMinPercent') }}</label>
-            <input
-              v-model.number="metricThresholds.sla_percent_min"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              class="input"
-            />
-            <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.slaMinPercentHint') }}</p>
+              <div v-if="emailConfig.alert.enabled">
+                <label class="input-label">{{ t('admin.ops.settings.alertRecipients') }}</label>
+                <div class="flex gap-2">
+                  <input
+                    v-model="alertRecipientInput"
+                    type="email"
+                    class="input"
+                    :placeholder="t('admin.ops.settings.emailPlaceholder')"
+                    @keydown.enter.prevent="addRecipient('alert')"
+                  />
+                  <button class="btn btn-secondary whitespace-nowrap" type="button" @click="addRecipient('alert')">
+                {{ t('common.add') }}
+                  </button>
+                </div>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <span
+                    v-for="email in emailConfig.alert.recipients"
+                    :key="email"
+                    class="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                  >
+                {{ email }}
+                    <button type="button" class="text-blue-700/80 hover:text-blue-900" @click="removeRecipient('alert', email)">×</button>
+                  </span>
+                </div>
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.ops.settings.recipientsHint') }}
+                </p>
+              </div>
+
+              <div v-if="emailConfig.alert.enabled">
+                <label class="input-label">{{ t('admin.ops.settings.minSeverity') }}</label>
+                <Select v-model="emailConfig.alert.min_severity" :options="severityOptions" />
+              </div>
+            </div>
           </div>
+        </template>
+        <template #reports>
+          <div class="rounded-2xl bg-gray-50 p-4 dark:bg-dark-700/50">
+            <h4 class="mb-3 text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.ops.settings.reportConfig') }}</h4>
 
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.ops.settings.enableReport') }}</label>
+                </div>
+                <Toggle v-model="emailConfig.report.enabled" />
+              </div>
 
-          <div>
-            <label class="input-label">{{ t('admin.ops.settings.ttftP99MaxMs') }}</label>
-            <input
-              v-model.number="metricThresholds.ttft_p99_ms_max"
-              type="number"
-              min="0"
-              step="50"
-              class="input"
-            />
-            <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.ttftP99MaxMsHint') }}</p>
+              <div v-if="emailConfig.report.enabled">
+                <label class="input-label">{{ t('admin.ops.settings.reportRecipients') }}</label>
+                <div class="flex gap-2">
+                  <input
+                    v-model="reportRecipientInput"
+                    type="email"
+                    class="input"
+                    :placeholder="t('admin.ops.settings.emailPlaceholder')"
+                    @keydown.enter.prevent="addRecipient('report')"
+                  />
+                  <button class="btn btn-secondary whitespace-nowrap" type="button" @click="addRecipient('report')">
+                {{ t('common.add') }}
+                  </button>
+                </div>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <span
+                    v-for="email in emailConfig.report.recipients"
+                    :key="email"
+                    class="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                  >
+                {{ email }}
+                    <button type="button" class="text-blue-700/80 hover:text-blue-900" @click="removeRecipient('report', email)">×</button>
+                  </span>
+                </div>
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.ops.settings.recipientsHint') }}
+                </p>
+              </div>
+
+              <div v-if="emailConfig.report.enabled" class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div class="flex items-center justify-between">
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dailySummary') }}</label>
+                  <Toggle v-model="emailConfig.report.daily_summary_enabled" />
+                </div>
+                <div v-if="emailConfig.report.daily_summary_enabled">
+                  <input v-model="emailConfig.report.daily_summary_schedule" type="text" class="input" placeholder="0 9 * * *" />
+                </div>
+                <div class="flex items-center justify-between">
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.weeklySummary') }}</label>
+                  <Toggle v-model="emailConfig.report.weekly_summary_enabled" />
+                </div>
+                <div v-if="emailConfig.report.weekly_summary_enabled">
+                  <input v-model="emailConfig.report.weekly_summary_schedule" type="text" class="input" placeholder="0 9 * * 1" />
+                </div>
+              </div>
+            </div>
           </div>
-
-          <div>
-            <label class="input-label">{{ t('admin.ops.settings.requestErrorRateMaxPercent') }}</label>
-            <input
-              v-model.number="metricThresholds.request_error_rate_percent_max"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              class="input"
-            />
-            <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.requestErrorRateMaxPercentHint') }}</p>
-          </div>
-
-          <div>
-            <label class="input-label">{{ t('admin.ops.settings.upstreamErrorRateMaxPercent') }}</label>
-            <input
-              v-model.number="metricThresholds.upstream_error_rate_percent_max"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              class="input"
-            />
-            <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.upstreamErrorRateMaxPercentHint') }}</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- 高级设置 -->
-      <details class="rounded-2xl bg-gray-50 dark:bg-dark-700/50">
-        <summary class="cursor-pointer p-4 text-sm font-semibold text-gray-900 dark:text-white">
-          {{ t('admin.ops.settings.advancedSettings') }}
-        </summary>
-        <div class="space-y-4 px-4 pb-4">
-          <!-- 数据保留策略 -->
+        </template>
+        <template #retention>
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dataRetention') }}</h5>
 
@@ -490,21 +495,8 @@ async function saveAllSettings() {
             </div>
             <p class="text-xs text-gray-500">{{ t('admin.ops.settings.retentionDaysHint') }}</p>
           </div>
-
-          <!-- 预聚合任务 -->
-          <div class="space-y-3">
-            <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.aggregation') }}</h5>
-
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.enableAggregation') }}</label>
-                <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.aggregationHint') }}</p>
-              </div>
-              <Toggle v-model="advancedSettings.aggregation.aggregation_enabled" />
-            </div>
-          </div>
-
-          <!-- OpenAI 账号配额自动暂停（全局默认阈值） -->
+        </template>
+        <template #limits>
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.openaiQuotaAutoPause') }}</h5>
             <p class="text-xs text-gray-500">{{ t('admin.ops.settings.openaiQuotaAutoPauseHint') }}</p>
@@ -538,7 +530,6 @@ async function saveAllSettings() {
             <p class="text-xs text-gray-500">{{ t('admin.ops.settings.openaiQuotaAutoPauseThresholdHint') }}</p>
           </div>
 
-          <!-- Error Filtering -->
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.errorFiltering') }}</h5>
 
@@ -582,8 +573,8 @@ async function saveAllSettings() {
               <Toggle v-model="advancedSettings.ignore_insufficient_balance_errors" />
             </div>
           </div>
-
-          <!-- Auto Refresh -->
+        </template>
+        <template #display>
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.autoRefresh') }}</h5>
 
@@ -610,7 +601,6 @@ async function saveAllSettings() {
             </div>
           </div>
 
-          <!-- Dashboard Cards -->
           <div class="space-y-3">
             <h5 class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.ops.settings.dashboardCards') }}</h5>
 
@@ -634,8 +624,8 @@ async function saveAllSettings() {
               <Toggle v-model="advancedSettings.display_openai_token_stats" />
             </div>
           </div>
-        </div>
-      </details>
+        </template>
+      </SettingsLayout>
     </div>
 
     <template #footer>
